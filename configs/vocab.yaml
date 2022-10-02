@@ -1,0 +1,15 @@
+vocab_size: 10000
+coverage: 1
+type: bpe
+
+unk_id: 0
+unk_piece: "[UNK]"
+
+pad_id: 1
+pad_piece: "[PAD]"
+
+bos_id: 2
+bos_piece: "[BOS]"
+
+eos_id: 3
+eos_piece: "[EOS]"
