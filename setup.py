@@ -1,4 +1,4 @@
-import os, json, yaml
+import os, json
 import sentencepiece as spm
 from datasets import load_dataset
 
@@ -19,22 +19,17 @@ def concat_data(train, valid, test):
 
 
 def build_vocab():
-    assert os.path.exists(f'configs/vocab.yaml')
-    with open('configs/vocab.yaml', 'r') as f:
-        vocab_dict = yaml.load(f, Loader=yaml.FullLoader)
-
     for file in ["src", 'trg']:        
         assert os.path.exists(f'data/{file}.txt')
         opt = f"--input=data/{file}.txt\
-                --model_prefix=data/{file}_tokenizer\
-                --vocab_size={vocab_dict['vocab_size']}\
-                --character_coverage={vocab_dict['coverage']}\
-                --model_type={vocab_dict['type']}\
-                --unk_id={vocab_dict['unk_id']} --unk_piece={vocab_dict['unk_piece']}\
-                --pad_id={vocab_dict['pad_id']} --pad_piece={vocab_dict['pad_piece']}\
-                --bos_id={vocab_dict['bos_id']} --bos_piece={vocab_dict['bos_piece']}\
-                --eos_id={vocab_dict['eos_id']} --eos_piece={vocab_dict['eos_piece']}"
-
+                --model_prefix=data/{file}_spm\
+                --vocab_size=10000\
+                --character_coverage=1\
+                --model_type=bpe\
+                --pad_id=0 --pad_piece='[PAD]'\
+                --unk_id=1 --unk_piece='[UNK]'\
+                --bos_id=2 --bos_piece='[BOS]'\
+                --eos_id=3 --eos_piece='[EOS]'"
         spm.SentencePieceTrainer.Train(opt)
         os.remove(f'data/{file}.txt')
 
@@ -62,9 +57,9 @@ def tokenize_datasets(train, valid, test, src_tokenizer, trg_tokenizer):
 
 def load_tokenizers():
     tokenizers = []
-    for side in ['src', 'trg']:
+    for lang in ['src', 'trg']:
         tokenizer = spm.SentencePieceProcessor()
-        tokenizer.load(f'data/{side}_tokenizer.model')
+        tokenizer.load(f'data/{lang}_spm.model')
         tokenizer.SetEncodeExtraOptions('bos:eos')    
         tokenizers.append(tokenizer)
     return tokenizers
@@ -109,8 +104,6 @@ def main(downsize=True, sort=True):
 
     if downsize:
         train = train[::100]
-        valid = valid[::2]
-        test = test[::2]
 
     if sort:
         train = sorted(train, key=lambda x: len(x['src']))

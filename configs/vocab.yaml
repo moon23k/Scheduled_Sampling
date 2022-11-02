@@ -2,11 +2,11 @@ vocab_size: 10000
 coverage: 1
 type: bpe
 
-unk_id: 0
-unk_piece: "[UNK]"
-
-pad_id: 1
+pad_id: 0
 pad_piece: "[PAD]"
+
+unk_id: 1
+unk_piece: "[UNK]"
 
 bos_id: 2
 bos_piece: "[BOS]"
