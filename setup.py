@@ -1,127 +1,67 @@
 import os, json
-import sentencepiece as spm
 from datasets import load_dataset
+from transformers import T5TokenizerFast
 
 
 
-def concat_data(train, valid, test):
-    src, trg = [], []
-    for split in (train, valid, test):
-        for elem in split:
-            src.append(elem['src'])
-            trg.append(elem['trg'])
+def process(orig_data, tokenizer, volumn=36000):
+    min_len = 10 
+    max_len = 300
+    max_diff = 50
 
-    with open('data/src.txt', 'w') as f:
-        f.write('\n'.join(src))
-    with open('data/trg.txt', 'w') as f:
-        f.write('\n'.join(trg))
+    volumn_cnt = 0
+    processed = []
+    
+    for elem in orig_data:
+        en_seq, de_seq = elem['en'].lower(), elem['de'].lower()
+        en_len, de_len = len(en_seq), len(de_seq)
 
+        #define filtering conditions
+        min_condition = (en_len >= min_len) & (de_len >= min_len)
+        max_condition = (en_len <= max_len) & (de_len <= max_len)
+        dif_condition = abs(en_len - de_len) < max_diff
 
-
-def build_vocab():
-    for file in ["src", 'trg']:        
-        assert os.path.exists(f'data/{file}.txt')
-        opt = f"--input=data/{file}.txt\
-                --model_prefix=data/{file}_spm\
-                --vocab_size=10000\
-                --character_coverage=1\
-                --model_type=bpe\
-                --pad_id=0 --pad_piece='[PAD]'\
-                --unk_id=1 --unk_piece='[UNK]'\
-                --bos_id=2 --bos_piece='[BOS]'\
-                --eos_id=3 --eos_piece='[EOS]'"
-        spm.SentencePieceTrainer.Train(opt)
-        os.remove(f'data/{file}.txt')
-
-
-
-def tokenize_datasets(train, valid, test, src_tokenizer, trg_tokenizer):
-    tokenized_data = []
-
-    for split in (train, valid, test):
-        split_tokenized = []
-        
-        for elem in split:
+        if max_condition & min_condition & dif_condition:
             temp_dict = dict()
             
-            temp_dict['src'] = src_tokenizer.EncodeAsIds(elem['src'])
-            temp_dict['trg'] = trg_tokenizer.EncodeAsIds(elem['trg'])
+            en_tokenized = tokenizer(en_seq, max_length=max_len, truncation=True)
+            de_tokenized = tokenizer(de_seq, max_length=max_len, truncation=True)
+
+            temp_dict['en_ids'] = en_tokenized['input_ids']
+            temp_dict['en_mask'] = en_tokenized['attention_mask']
+            temp_dict['de_ids'] = de_tokenized['input_ids']
+            temp_dict['de_mask'] = de_tokenized['attention_mask']
             
-            split_tokenized.append(temp_dict)
-        
-        tokenized_data.append(split_tokenized)
-    
-    return tokenized_data
+            processed.append(temp_dict)
+            
+            #End condition
+            volumn_cnt += 1
+            if volumn_cnt == volumn:
+                break
+
+    return processed
 
 
 
-def load_tokenizers():
-    tokenizers = []
-    for lang in ['src', 'trg']:
-        tokenizer = spm.SentencePieceProcessor()
-        tokenizer.load(f'data/{lang}_spm.model')
-        tokenizer.SetEncodeExtraOptions('bos:eos')    
-        tokenizers.append(tokenizer)
-    return tokenizers
-
-
-
-
-def save_datasets(train, valid, test):
+def save_data(data_obj):
+    #split data into train/valid/test sets
+    train, valid, test = data_obj[:-6000], data_obj[-6000:-3000], data_obj[-3000:]
     data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
+
     for key, val in data_dict.items():
         with open(f'data/{key}.json', 'w') as f:
-            json.dump(val, f)
-
-
-
-def filter_dataset(data, min_len=10, max_len=300):
-    filtered = []
-    for elem in data:
-        temp_dict = dict()
-        src_len, trg_len = len(elem['en']), len(elem['de'])
-        max_condition = (src_len <= max_len) & (trg_len <= max_len)
-        min_condition = (src_len >= min_len) & (trg_len >= min_len)
-
-        if max_condition & min_condition:
-            temp_dict['src'] = elem['en']
-            temp_dict['trg'] = elem['de']
-            filtered.append(temp_dict)
-
-    return filtered
-
-
-
-def main(downsize=True, sort=True):
-    #Download datasets
-    train = load_dataset('wmt14', 'de-en', split='train')['translation']
-    valid = load_dataset('wmt14', 'de-en', split='validation')['translation']
-    test = load_dataset('wmt14', 'de-en', split='test')['translation']
-
-    train = filter_dataset(train)
-    valid = filter_dataset(valid)
-    test = filter_dataset(test)
-
-    if downsize:
-        train = train[::100]
-
-    if sort:
-        train = sorted(train, key=lambda x: len(x['src']))
-        valid = sorted(valid, key=lambda x: len(x['src']))
-        test = sorted(test, key=lambda x: len(x['src']))
-
-    #create concat
-    concat_data(train, valid, test)
-    build_vocab()
-    src_tokenizer, trg_tokenizer = load_tokenizers()
+            json.dump(val, f)        
+        assert os.path.exists(f'data/{key}.json')
     
-    train, valid, test = tokenize_datasets(train, valid, test, src_tokenizer, trg_tokenizer)
-    save_datasets(train, valid, test)
+
+
+def main():
+    tokenizer = T5TokenizerFast.from_pretrained('t5-small', model_max_length=300)
+    orig = load_dataset('wmt14', 'de-en', split='train')['translation']
+    processed = process(orig, tokenizer)
+    save_data(processed)
 
 
 
 if __name__ == '__main__':
     main()
-    assert os.path.exists(f'data/train.json')
-    assert os.path.exists(f'data/valid.json')
-    assert os.path.exists(f'data/test.json')
