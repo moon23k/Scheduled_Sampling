@@ -11,20 +11,12 @@ class TrainerBase:
         
         self.src = config.src
         self.trg = config.trg
-        self.task = config.task
         self.clip = config.clip
         self.device = config.device
         self.n_epochs = config.n_epochs
-        self.vocab_size = config.vocab_size
         self.device_type = config.device_type
         self.scaler = torch.cuda.amp.GradScaler()
-        self.iters_to_accumulate = config.iters_to_accumulate        
-        
-        self.gen_ckpt = config.gen_save_ckpt
-        self.dis_ckpt = config.dis_save_ckpt
-        
-        self.gen_record_path = f"ckpt/{self.gen_ckpt}.json"
-        self.dis_record_path = f"ckpt/{self.dis_ckpt}.json"
+        self.iters_to_accumulate = config.iters_to_accumulate
 
 
     def print_epoch(self, record_dict):
@@ -74,13 +66,17 @@ class Trainer(TrainerBase):
         self.record_keys = ['epoch', 'gen_train_loss', 'gen_valid_loss',
                             'dis_train_loss', 'dis_valid_loss',  
                             'gen_lr', 'dis_lr', 'train_time']
-        #lr은 gen과 dis를 다르게 setting
+        
         self.gen_optimizer = optim.AdamW(params=self.generator.parameters(), lr=config.lr)
         self.dis_optimizer = optim.AdamW(params=self.discriminator.parameters(), lr=config.lr)
 
         self.gen_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.gen_optimizer, 'min')
         self.dis_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.dis_optimizer, 'min')
 
+        self.gen_ckpt = config.gen_ckpt
+        self.dis_ckpt = config.dis_ckpt
+        self.gen_record_path = self.gen_ckpt.replace('pt', 'json')
+        self.dis_record_path = self.dis_ckpt.replace('pt', 'json')
 
 
     def train(self):
@@ -217,6 +213,10 @@ class PreTrainer(TrainerBase):
         self.optimizer = optim.AdamW(params=self.model.parameters(), lr=config.lr)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
         
+        self.ckpt = config.gen_pre_ckpt \
+        if config.model_type == 'generator' else config.dis_pre_ckpt
+        self.record_path = self.ckpt.replace('pt', 'json')
+
 
     def train(self):
         best_loss, records = float('inf'), []

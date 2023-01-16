@@ -1,6 +1,4 @@
-import os, argparse, torch
-from torch import Transformer
-
+import os, json, argparse, torch
 from module.data import load_dataloader
 from module.model import load_models
 from module.train import Trainer, PreTrainer
@@ -14,16 +12,16 @@ from transformers import (set_seed,
 class Config(object):
     def __init__(self, args):    
 
-        self.mode = args.mode
         self.task = args.task
+        self.mode = args.mode
         self.model_type = args.model
         self.model_name = 't5-small'
         self.src, self.trg = self.task[:2], self.task[2:]
 
         self.clip = 1
+        self.lr = 5e-5
         self.n_epochs = 10
         self.batch_size = 16
-        self.learning_rate = 5e-5
         self.iters_to_accumulate = 4
         
         use_cuda = torch.cuda.is_available()
@@ -67,6 +65,7 @@ def inference(model, tokenizer):
         print(f"Model Out Sequence >> {output_seq}")       
 
 
+
 def pretrain(config, generator, discriminator):
     train_dataloader = load_dataloader(config, 'train')
     valid_dataloader = load_dataloader(config, 'valid')
@@ -74,6 +73,7 @@ def pretrain(config, generator, discriminator):
     model = generator if generator is not None else discriminator
     pretrainer = PreTrainer(config, model, train_dataloader, valid_dataloader)
     pretrainer.train()
+
 
 
 def train(config, generator, discriminator):
@@ -84,25 +84,36 @@ def train(config, generator, discriminator):
     trainer.train()
 
 
+
 def test(config, model, tokenizer):
     test_dataloader = load_dataloader(config, 'test')
     tester = Tester(config, model, tokenizer, test_dataloader)
     tester.test()    
 
 
-def generate(config, model):
+
+def generate(config, model, split):
     generated = []
     train_dataloader = load_dataloader(config, 'train')
     
     model.eval()
     with torch.no_grad():
         for _, batch in enumerate(train_dataloader):   
-            
             input_ids = batch[f'{config.src}_ids'].to(config.device)
-            labels = batch[f'{config.trg}_ids'].to(config.device)
-                            
+            attention_mask = batch[f'{config.src}_mask'].to(config.device)
+            labels = batch[f'{config.trg}_ids'].tolist()
+
             with torch.autocast(device_type=config.device_type, dtype=torch.float16):
-                preds = model.generate(input_ids, max_new_tokens=labels.size(1), use_cache=True)    
+                preds = model.generate(input_ids, attention_mask=attention_mask,
+                                       max_new_tokens=300, use_cache=True).tolist()
+            
+            for pos, neg in zip(labels, preds):
+                generated.append({'input_ids': pos, 'labels': 1})
+                generated.append({'input_ids': neg, 'labels': 0})
+
+    with open(f"data/dis_{split}.json", 'w') as f:
+        json.dump(generated, f)
+        assert os.path.exists(f'data/gen_{split}.json')
 
 
 
@@ -117,13 +128,14 @@ def main(args):
         setattr(config, 'pad_id', discriminator.pad_id)
 
     if config.task not in  ['pretrain','train']:
-        tokenizer = PreTrainedTokenizerFast.from_pretrained(config.model_name, model_max_length=300)
+        tokenizer = T5TokenizerFast.from_pretrained(config.model_name, model_max_length=300)
 
     #Actual Processing Codes
     if config.mode == 'pretrain':
         pretrain(config, generator, discriminator)
     elif config.mode == 'generate':
-        generate(config, generator, tokenizer)
+        generate(config, generator, 'train')
+        generate(config, generator, 'valid')
     elif config.mode == 'train':
         train(config, generator, discriminator)
     elif config.mode == 'test':
@@ -149,7 +161,7 @@ if __name__ == '__main__':
         if args.model == 'discriminator':
             assert os.path.exists('data/samples.json')
     else:
-        if args.mode == 'train'
+        if args.mode == 'train':
             assert os.path.exists(f'ckpt/pre_{args.task}_generator.pt')
             assert os.path.exists(f'ckpt/pre_{args.task}_discriminator.pt')
         else:
