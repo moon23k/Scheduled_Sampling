@@ -1,5 +1,6 @@
 import os, torch
 import torch.nn as nn
+import torch.nn.functional as F
 from collections import namedtuple
 from transformers import (T5Config,
                           T5EncoderModel,
@@ -10,22 +11,22 @@ from transformers import (T5Config,
 class Discriminator(nn.Module):
     def __init__(self, config):
         super(Discriminator, self).__init__()
-        self.device = config.device
-
+        
         self.encoder = T5EncoderModel.from_pretrained(config.model_name)
         self.classifier = nn.Linear(self.encoder.config.d_model, 1)
         self.dropout = nn.Dropout(self.encoder.config.dropout_rate)
-
-        self.pad_id = self.encoder.pad_token_id
-        self.criterion = nn.BCELoss(ignore_index=self.pad_id, 
-                                    label_smoothing=0.1).to(self.device)
+        
+        self.device = config.device
+        self.pad_id = self.encoder.config.pad_token_id
+        self.criterion = nn.BCEWithLogitsLoss().to(self.device)
         self.outputs = namedtuple('Discriminator_Outputs', ('logit', 'loss'))
 
         
     def forward(self, input_ids, attention_mask, labels):
-        enc_out = self.encoder(input_ids, attention_mask).last_hidden_state
-        out = self.classifier(enc_out)
-        out = self.dropout(out)
+        out = self.encoder(input_ids, attention_mask).last_hidden_state
+        out = self.classifier(out[:, 0])
+        out = self.dropout(out).squeeze()
+
         loss = self.criterion(out, labels)
         return self.outputs(out, loss)
 
@@ -61,8 +62,9 @@ def load_generator(config):
 
     generator_config = T5Config()
     generator = T5ForConditionalGeneration(generator_config)
+    print(f"Generator for {config.mode} has loaded")
 
-    ckpt = config.gen_pre_ckpt if config.mode == 'train' else config.gen_ckpt
+    ckpt = config.gen_pre_ckpt if config.mode in ['train', 'generate'] else config.gen_ckpt
     assert os.path.exists(ckpt)
     generator_state = torch.torch.load(ckpt, map_location=config.device)['model_state_dict']
     generator.load_state_dict(generator_state)

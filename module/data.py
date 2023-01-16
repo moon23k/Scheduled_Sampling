@@ -90,7 +90,7 @@ def load_dataloader(config, split):
         
         ids_batch = pad_batch(ids_batch, pad_id)
         mask_batch = pad_batch(mask_batch, pad_id)
-        labels_batch = torch.LongTensor(labels_batch)
+        labels_batch = torch.Tensor(labels_batch)
 
         return {'input_ids': ids_batch,
                 'attention_mask': mask_batch,

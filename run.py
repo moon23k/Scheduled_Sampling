@@ -65,7 +65,6 @@ def inference(model, tokenizer):
         print(f"Model Out Sequence >> {output_seq}")       
 
 
-
 def pretrain(config, generator, discriminator):
     train_dataloader = load_dataloader(config, 'train')
     valid_dataloader = load_dataloader(config, 'valid')
@@ -73,7 +72,6 @@ def pretrain(config, generator, discriminator):
     model = generator if generator is not None else discriminator
     pretrainer = PreTrainer(config, model, train_dataloader, valid_dataloader)
     pretrainer.train()
-
 
 
 def train(config, generator, discriminator):
@@ -84,37 +82,35 @@ def train(config, generator, discriminator):
     trainer.train()
 
 
-
 def test(config, model, tokenizer):
     test_dataloader = load_dataloader(config, 'test')
     tester = Tester(config, model, tokenizer, test_dataloader)
     tester.test()    
 
 
-
 def generate(config, model, split):
     generated = []
-    train_dataloader = load_dataloader(config, 'train')
-    
+    dataloader = load_dataloader(config, split)
+    model.config.update({'decoder_start_token_id': config.pad_id})
+
     model.eval()
     with torch.no_grad():
-        for _, batch in enumerate(train_dataloader):   
+        for _, batch in enumerate(dataloader):   
             input_ids = batch[f'{config.src}_ids'].to(config.device)
             attention_mask = batch[f'{config.src}_mask'].to(config.device)
             labels = batch[f'{config.trg}_ids'].tolist()
 
             with torch.autocast(device_type=config.device_type, dtype=torch.float16):
-                preds = model.generate(input_ids, attention_mask=attention_mask,
-                                       max_new_tokens=300, use_cache=True).tolist()
+                preds = model.generate(input_ids=input_ids, attention_mask=attention_mask, 
+                                        max_new_tokens=300, use_cache=True).tolist()
             
             for pos, neg in zip(labels, preds):
-                generated.append({'input_ids': pos, 'labels': 1})
-                generated.append({'input_ids': neg, 'labels': 0})
+                generated.append({'input_ids': [id for id in pos if id], 'labels': 1})
+                generated.append({'input_ids': [id for id in neg if id], 'labels': 0})
 
     with open(f"data/dis_{split}.json", 'w') as f:
         json.dump(generated, f)
         assert os.path.exists(f'data/gen_{split}.json')
-
 
 
 def main(args):

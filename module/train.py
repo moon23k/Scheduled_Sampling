@@ -24,10 +24,7 @@ class TrainerBase:
               Time: {record_dict['train_time']}""".replace(' ' * 14, ''))
         
         print(f"""  >> Train Loss: {record_dict['train_loss']:.3f} | \
-              Train PPL: {record_dict['train_ppl']:.2f}""".replace(' ' * 14, ''))
-
-        print(f"""  >> Valid Loss: {record_dict['valid_loss']:.3f} | \
-              Valid PPL: {record_dict['valid_ppl']:.2f}\n""".replace(' ' * 14, ''))
+              Valid Loss: {record_dict['valid_loss']:.3f}""".replace(' ' * 14, ''))
 
 
     @staticmethod
@@ -36,13 +33,6 @@ class TrainerBase:
         elapsed_min = int(elapsed_time / 60)
         elapsed_sec = int(elapsed_time - (elapsed_min * 60))
         return f"{elapsed_min}m {elapsed_sec}s"        
-
-
-    def split_batch(self, batch):
-        input_ids = batch[f'{self.src}_ids'].to(self.device)
-        attention_mask =  batch[f'{self.src}_mask'].to(self.device)
-        labels = batch[f'{self.trg}_ids'].to(self.device)        
-        return input_ids, attention_mask, labels        
 
 
     def save_ckpt(self, epoch, ckpt, model, optimizer):
@@ -75,8 +65,15 @@ class Trainer(TrainerBase):
 
         self.gen_ckpt = config.gen_ckpt
         self.dis_ckpt = config.dis_ckpt
-        self.gen_record_path = self.gen_ckpt.replace('pt', 'json')
-        self.dis_record_path = self.dis_ckpt.replace('pt', 'json')
+        self.gen_record_path = self.gen_ckpt.replace('.pt', '.json')
+        self.dis_record_path = self.dis_ckpt.replace('.pt', '.json')
+
+
+    def split_batch(self, batch):
+        input_ids = batch[f'{self.src}_ids'].to(self.device)
+        attention_mask =  batch[f'{self.src}_mask'].to(self.device)
+        labels = batch[f'{self.trg}_ids'].to(self.device)        
+        return input_ids, attention_mask, labels        
 
 
     def train(self):
@@ -137,11 +134,11 @@ class Trainer(TrainerBase):
 
 
     def train_epoch(self):
-        self.generator.train()
-        self.discriminator.train()
-
         gen_epoch_loss, dis_epoch_loss = 0, 0
         tot_len = len(self.train_dataloader)
+
+        self.generator.train()
+        self.discriminator.train()
 
         for idx, batch in enumerate(self.train_dataloader):
             input_ids, attention_mask, labels = self.split_batch(batch)
@@ -178,11 +175,11 @@ class Trainer(TrainerBase):
 
 
     def valid_epoch(self):
-        self.generator.eval()
-        self.discriminator.eval()
-
         gen_epoch_loss, dis_epoch_loss = 0, 0
         tot_len = len(self.valid_dataloader)
+
+        self.generator.eval()
+        self.discriminator.eval()
         
         with torch.no_grad():
             for _, batch in enumerate(self.valid_dataloader):   
@@ -207,15 +204,20 @@ class PreTrainer(TrainerBase):
         self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
         
-        self.record_keys = ['epoch', 'train_loss', 'valid_loss',
-                            'lr', 'train_time']
-        
         self.optimizer = optim.AdamW(params=self.model.parameters(), lr=config.lr)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
         
         self.ckpt = config.gen_pre_ckpt \
         if config.model_type == 'generator' else config.dis_pre_ckpt
-        self.record_path = self.ckpt.replace('pt', 'json')
+        self.record_path = self.ckpt.replace('.pt', '.json')
+        self.record_keys = ['epoch', 'train_loss', 'valid_loss', 'lr', 'train_time']
+
+
+    def split_batch(self, batch):
+        input_ids = batch['input_ids'].to(self.device)
+        attention_mask =  batch['attention_mask'].to(self.device)
+        labels = batch['labels'].to(self.device)        
+        return input_ids, attention_mask, labels        
 
 
     def train(self):
@@ -245,19 +247,18 @@ class PreTrainer(TrainerBase):
 
 
     def train_epoch(self):
-        self.model.train()
-
         epoch_loss = 0
         tot_len = len(self.train_dataloader)
 
+        self.model.train()
         for idx, batch in enumerate(self.train_dataloader):
             input_ids, attention_mask, labels = self.split_batch(batch)
-            
-            loss = self.model(input_ids=input_ids, 
-                              attention_mask=attention_mask, 
-                              labels=labels).loss
-            
-            loss = loss / self.iters_to_accumulate
+    
+            with torch.autocast(device_type=self.device_type, dtype=torch.float16):
+                loss = self.model(input_ids=input_ids, 
+                                  attention_mask=attention_mask, 
+                                  labels=labels).loss    
+                loss = loss / self.iters_to_accumulate
             self.scaler.scale(loss).backward()
             
             if (idx + 1) % self.iters_to_accumulate == 0:
@@ -277,19 +278,19 @@ class PreTrainer(TrainerBase):
         return epoch_loss
     
 
-
     def valid_epoch(self):
-        self.model.eval()
-
         epoch_loss = 0
         tot_len = len(self.valid_dataloader)
         
+        self.model.eval()
         with torch.no_grad():
             for _, batch in enumerate(self.valid_dataloader):   
-                input_ids, attention_mask, labels = self.split_batch(batch)           
-                loss = self.model(input_ids=input_ids, 
-                                  attention_mask=attention_mask, 
-                                  labels=labels).loss
+                input_ids, attention_mask, labels = self.split_batch(batch)       
+      
+                with torch.autocast(device_type=self.device_type, dtype=torch.float16):    
+                    loss = self.model(input_ids=input_ids, 
+                                      attention_mask=attention_mask, 
+                                      labels=labels).loss
 
                 epoch_loss += loss.item()
     
