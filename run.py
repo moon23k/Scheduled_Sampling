@@ -1,12 +1,11 @@
 import os, argparse, torch
 from torch import Transformer
 
-from module.test import Tester
-from module.train import Trainer, PreTrainer
 from module.data import load_dataloader
-
+from module.model import load_models
+from module.train import Trainer, PreTrainer
+from module.test import Tester
 from transformers import (set_seed,
-                          T5Config, 
                           T5TokenizerFast, 
                           T5ForConditionalGeneration)
 
@@ -18,10 +17,8 @@ class Config(object):
         self.mode = args.mode
         self.task = args.task
         self.model_type = args.model
+        self.model_name = 't5-small'
         self.src, self.trg = self.task[:2], self.task[2:]
-        self.ckpt = f"ckpt/{self.task}_{self.model_type}.pt" \
-                      if self.task != 'pretrain' \
-                      else f"ckpt/pre_{self.task}_{self.model_type}.pt"
 
         self.clip = 1
         self.n_epochs = 10
@@ -37,49 +34,14 @@ class Config(object):
         else:
             self.device = torch.device('cuda' if use_cuda else 'cpu')
 
+        self.gen_ckpt = f'ckpt/{self.task}_generator.pt'
+        self.dis_ckpt = f'ckpt/{self.task}_discriminator.pt'
+        self.gen_pre_ckpt= f'ckpt/pre_{self.task}_generator.pt'
+        self.dis_pre_ckpt = f'ckpt/pre_{self.task}_discriminator.pt'
 
     def print_attr(self):
         for attribute, value in self.__dict__.items():
             print(f"* {attribute}: {value}")
-
-
-def load_model(config):
-    if config.mode == 'train':
-        model = BartForConditionalGeneration.from_pretrained(config.model_name)
-        print(f"Pretrained {config.task.upper()} BART Model for has loaded")
-    
-    if config.mode != 'train':
-        assert os.path.exists(config.ckpt)
-        model_config = BartConfig.from_pretrained(config.model_name)
-        model = BartForConditionalGeneration(model_config)
-        print(f"Initialized {config.task.upper()} BART Model has loaded")
-
-        model_state = torch.load(config.ckpt, map_location=config.device)['model_state_dict']
-        model.load_state_dict(model_state)
-        print(f"Trained Model states has loaded from {config.ckpt}")
-
-
-
-
-    def count_params(model):
-        params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        return params
-        
-    def check_size(model):
-        param_size, buffer_size = 0, 0
-
-        for param in model.parameters():
-            param_size += param.nelement() * param.element_size()
-        
-        for buffer in model.buffers():
-            buffer_size += buffer.nelement() * buffer.element_size()
-
-        size_all_mb = (param_size + buffer_size) / 1024**2
-        return size_all_mb
-
-    print(f"--- Model Params: {count_params(model):,}")
-    print(f"--- Model  Size : {check_size(model):.3f} MB\n")
-    return model.to(config.device)
 
 
 
@@ -105,11 +67,20 @@ def inference(model, tokenizer):
         print(f"Model Out Sequence >> {output_seq}")       
 
 
-
-def train(config, model):
+def pretrain(config, generator, discriminator):
     train_dataloader = load_dataloader(config, 'train')
     valid_dataloader = load_dataloader(config, 'valid')
-    trainer = Trainer(config, model, train_dataloader, valid_dataloader)
+    
+    model = generator if generator is not None else discriminator
+    pretrainer = PreTrainer(config, model, train_dataloader, valid_dataloader)
+    pretrainer.train()
+
+
+def train(config, generator, discriminator):
+    train_dataloader = load_dataloader(config, 'train')
+    valid_dataloader = load_dataloader(config, 'valid')
+
+    trainer = Trainer(config, generator, discriminator, train_dataloader, valid_dataloader)
     trainer.train()
 
 
@@ -117,8 +88,6 @@ def test(config, model, tokenizer):
     test_dataloader = load_dataloader(config, 'test')
     tester = Tester(config, model, tokenizer, test_dataloader)
     tester.test()    
-
-
 
 
 def generate(config, model):
@@ -133,37 +102,34 @@ def generate(config, model):
             labels = batch[f'{config.trg}_ids'].to(config.device)
                             
             with torch.autocast(device_type=config.device_type, dtype=torch.float16):
-                preds = model.generate(input_ids, max_new_tokens=300, use_cache=True)    
-    
-            
+                preds = model.generate(input_ids, max_new_tokens=labels.size(1), use_cache=True)    
 
 
 
 def main(args):
     set_seed(42)
-    config = Config(args.task, args.task)
-    model = load_model(config)
+    config = Config(args.task, args.task)    
+    generator, discriminator = load_models(config)
+    
+    if generator is not None:
+        setattr(config, 'pad_id', generator.config.pad_token_id)
+    else:
+        setattr(config, 'pad_id', discriminator.pad_id)
 
-    setattr(config, 'pad_id', model.config.pad_token_id)
-
-    if config.task != 'train':
+    if config.task not in  ['pretrain','train']:
         tokenizer = PreTrainedTokenizerFast.from_pretrained(config.model_name, model_max_length=300)
 
-
+    #Actual Processing Codes
     if config.mode == 'pretrain':
-        pretrain(config, model)
-
+        pretrain(config, generator, discriminator)
     elif config.mode == 'generate':
-        generate(config, model, tokenizer)
-
+        generate(config, generator, tokenizer)
     elif config.mode == 'train':
-        train(config, model)
-
+        train(config, generator, discriminator)
     elif config.mode == 'test':
-        test(config, model, tokenizer)
-    
+        test(config, generator, tokenizer)
     elif config.mode == 'inference':
-        inference(model, tokenizer)
+        inference(generator, tokenizer)
     
 
 
@@ -174,19 +140,19 @@ if __name__ == '__main__':
     parser.add_argument('-model', default='generator', required=False)
     
     args = parser.parse_args()
-
-
     assert args.task in ['ende', 'deen']
-    assert args.mode in ['train', 'test', 'inference', 'pretrain', 'generate']
+    assert args.mode in ['pretrain', 'generate', 'train', 'test', 'inference']
+
 
     if args.mode == 'pretrain':
         assert args.model in ['generator', 'discriminator']
+        if args.model == 'discriminator':
+            assert os.path.exists('data/samples.json')
     else:
         if args.mode == 'train'
-            assert os.path.exists(f'ckpt/pre_{args.task}_{args.model}.pt')
-            if args.model == 'discriminator':
-                assert os.path.exists('data/samples.json')
+            assert os.path.exists(f'ckpt/pre_{args.task}_generator.pt')
+            assert os.path.exists(f'ckpt/pre_{args.task}_discriminator.pt')
         else:
-            assert os.path.exists(f'ckpt/{args.task}_{args.model}.pt')
+            assert os.path.exists(f'ckpt/{args.task}_generator.pt')
 
     main(args)

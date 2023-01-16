@@ -20,8 +20,11 @@ class TrainerBase:
         self.scaler = torch.cuda.amp.GradScaler()
         self.iters_to_accumulate = config.iters_to_accumulate        
         
-        self.ckpt = config.ckpt
-        self.record_path = f"ckpt/{config.task}_{config.model_name}.json"
+        self.gen_ckpt = config.gen_save_ckpt
+        self.dis_ckpt = config.dis_save_ckpt
+        
+        self.gen_record_path = f"ckpt/{self.gen_ckpt}.json"
+        self.dis_record_path = f"ckpt/{self.dis_ckpt}.json"
 
 
     def print_epoch(self, record_dict):
@@ -57,6 +60,7 @@ class TrainerBase:
                     ckpt)
 
 
+
 class Trainer(TrainerBase):
     def __init__(self, config, generator, discriminator, train_dataloader, valid_dataloader):
         super(Trainer, self).__init__(config)
@@ -70,16 +74,12 @@ class Trainer(TrainerBase):
         self.record_keys = ['epoch', 'gen_train_loss', 'gen_valid_loss',
                             'dis_train_loss', 'dis_valid_loss',  
                             'gen_lr', 'dis_lr', 'train_time']
-        
-        #criterion for discriminator
-        self.criterion = nn.BCELoss(ignore_index=config.pad_id, 
-                                    label_smoothing=0.1).to(self.device)
+        #lr은 gen과 dis를 다르게 setting
+        self.gen_optimizer = optim.AdamW(params=self.generator.parameters(), lr=config.lr)
+        self.dis_optimizer = optim.AdamW(params=self.discriminator.parameters(), lr=config.lr)
 
-        self.gen_optimizer = optim.AdamW(params=self.generator.parameters(), lr=lr)
-        self.dis_optimizer = optim.AdamW(params=self.discriminator.parameters(), lr=lr)
-
-        #set lr scheduler for generator
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.gen_optimizer, 'min')
+        self.gen_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.gen_optimizer, 'min')
+        self.dis_scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.dis_optimizer, 'min')
 
 
 
@@ -99,18 +99,18 @@ class Trainer(TrainerBase):
             
             gen_curr_loss = record_dict['gen_valid_loss']
             dis_curr_loss = record_dict['dis_valid_loss']
-            self.scheduler.step(gen_loss) #scheduling generator only!
-
+            self.gen_scheduler.step(gen_curr_loss)
+            self.dis_scheduler.step(dis_curr_loss)
 
             #save best generator states
             if gen_best_loss >= gen_curr_loss:
                 gen_best_loss = gen_curr_loss
-                self.save_ckpt(epoch, self.ckpt, self.generator, self.gen_optimizer)
+                self.save_ckpt(epoch, self.gen_ckpt, self.generator, self.gen_optimizer)
 
             #save best discriminator states
             if dis_best_loss >= dis_curr_loss:
                 dis_best_loss = dis_curr_loss
-                self.save_ckpt(epoch, self.ckpt, self.discriminator, self.dis_optimizer)
+                self.save_ckpt(epoch, self.dis_ckpt, self.discriminator, self.dis_optimizer)
 
         #save train_records
         with open(self.record_path, 'w') as fp:
@@ -119,27 +119,25 @@ class Trainer(TrainerBase):
 
     def get_losses(self, input_ids, attention_mask, labels):
         batch_size = input_ids.size(0)
-
         samples = self.generator.generate(input_ids=input_ids, 
                                           max_new_tokens=labels.size(-1), 
                                           use_cache=True)
         
         dis_inputs = torch.cat((samples, labels), dim=-1)
-        indices = torch.randperm(batch_size * 2)        
+        dis_labels_indice = torch.randperm(batch_size * 2)        
         
-        dis_inputs = dis_inputs[indices]
-        dis_labels = indices[indices > batch_size]
+        dis_inputs = dis_inputs[dis_labels_indice]
+        dis_labels = dis_labels_indice[dis_labels_indice > batch_size]
 
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-       
             gen_loss = self.generator(input_ids=input_ids, 
                                       attention_mask=attention_mask,
                                       labels=labels).loss
 
-            dis_logit = self.discriminator(inputs=dis_inputs)
-            dis_loss = self.criterion(dis_logit, dis_labels)
-
-        return gen_loss + dis_logit, dis_loss
+            dis_loss = self.discriminator(inputs_ids=dis_inputs, 
+                                          labels=dis_labels).loss
+            
+        return gen_loss + dis_loss, dis_loss
 
 
     def train_epoch(self):
@@ -151,7 +149,6 @@ class Trainer(TrainerBase):
 
         for idx, batch in enumerate(self.train_dataloader):
             input_ids, attention_mask, labels = self.split_batch(batch)
-
             gen_loss, dis_loss = self.get_losses(self, input_ids, attention_mask, labels)
 
             gen_loss = gen_loss / self.iters_to_accumulate
@@ -162,13 +159,18 @@ class Trainer(TrainerBase):
             
             if (idx + 1) % self.iters_to_accumulate == 0:
                 #Gradient Clipping
-                self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip)
+                self.scaler.unscale_(self.gen_optimizer)
+                self.scaler.unscale_(self.dis_optimizer)
+                nn.utils.clip_grad_norm_(self.generator.parameters(), max_norm=self.clip)
+                nn.utils.clip_grad_norm_(self.discriminator.parameters(), max_norm=self.clip)
                 
                 #Gradient Update & Scaler Update
-                self.scaler.step(self.optimizer)
+                self.scaler.step(self.gen_optimizer)
+                self.scaler.step(self.dis_optimizer)
+                
                 self.scaler.update()
-                self.optimizer.zero_grad()
+                self.gen_optimizer.zero_grad()
+                self.dis_optimizer.zero_grad()
 
             gen_epoch_loss += gen_loss.item()
             dis_epoch_loss += dis_loss.item()
@@ -189,7 +191,6 @@ class Trainer(TrainerBase):
         with torch.no_grad():
             for _, batch in enumerate(self.valid_dataloader):   
                 input_ids, attention_mask, labels = self.split_batch(batch)           
-                
                 gen_loss, dis_loss = self.get_losses(self, input_ids, attention_mask, labels)
 
                 gen_epoch_loss += gen_loss.item()
@@ -198,3 +199,99 @@ class Trainer(TrainerBase):
         gen_epoch_loss = round(gen_epoch_loss / tot_len, 3)
         dis_epoch_loss = round(dis_epoch_loss / tot_len, 3)
         return gen_epoch_loss, gen_epoch_loss
+
+
+
+
+class PreTrainer(TrainerBase):
+    def __init__(self, config, model, train_dataloader, valid_dataloader):
+        super(PreTrainer, self).__init__(config)
+
+        self.model = model
+        self.train_dataloader = train_dataloader
+        self.valid_dataloader = valid_dataloader
+        
+        self.record_keys = ['epoch', 'train_loss', 'valid_loss',
+                            'lr', 'train_time']
+        
+        self.optimizer = optim.AdamW(params=self.model.parameters(), lr=config.lr)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min')
+        
+
+    def train(self):
+        best_loss, records = float('inf'), []
+        for epoch in range(1, self.n_epochs + 1):
+            start_time = time.time()
+
+            record_vals = [epoch, self.train_epoch(), self.valid_epoch(), 
+                           self.optimizer.param_groups[0]['lr'],
+                           self.measure_time(start_time, time.time())]
+            record_dict = {k: v for k, v in zip(self.record_keys, record_vals)}
+            
+            records.append(record_dict)
+            self.print_epoch(record_dict)
+            
+            curr_loss = record_dict['valid_loss']
+            self.scheduler.step(curr_loss)
+
+            #save best generator states
+            if best_loss >= curr_loss:
+                best_loss = curr_loss
+                self.save_ckpt(epoch, self.ckpt, self.model, self.optimizer)
+
+        #save train_records
+        with open(self.record_path, 'w') as fp:
+            json.dump(records, fp)
+
+
+    def train_epoch(self):
+        self.model.train()
+
+        epoch_loss = 0
+        tot_len = len(self.train_dataloader)
+
+        for idx, batch in enumerate(self.train_dataloader):
+            input_ids, attention_mask, labels = self.split_batch(batch)
+            
+            loss = self.model(input_ids=input_ids, 
+                              attention_mask=attention_mask, 
+                              labels=labels).loss
+            
+            loss = loss / self.iters_to_accumulate
+            self.scaler.scale(loss).backward()
+            
+            if (idx + 1) % self.iters_to_accumulate == 0:
+                #Gradient Clipping
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip)
+                
+                #Gradient Update & Scaler Update
+                self.scaler.step(self.optimizer)
+                
+                self.scaler.update()
+                self.optimizer.zero_grad()
+
+            epoch_loss += loss.item()
+        
+        epoch_loss = round(epoch_loss / tot_len, 3)
+        return epoch_loss
+    
+
+
+    def valid_epoch(self):
+        self.model.eval()
+
+        epoch_loss = 0
+        tot_len = len(self.valid_dataloader)
+        
+        with torch.no_grad():
+            for _, batch in enumerate(self.valid_dataloader):   
+                input_ids, attention_mask, labels = self.split_batch(batch)           
+                loss = self.model(input_ids=input_ids, 
+                                  attention_mask=attention_mask, 
+                                  labels=labels).loss
+
+                epoch_loss += loss.item()
+    
+        epoch_loss = round(epoch_loss / tot_len, 3)
+        return epoch_loss        

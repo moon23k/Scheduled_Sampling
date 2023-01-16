@@ -49,9 +49,9 @@ def save_data(data_obj):
     data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
 
     for key, val in data_dict.items():
-        with open(f'data/{key}.json', 'w') as f:
+        with open(f'data/gen_{key}.json', 'w') as f:
             json.dump(val, f)        
-        assert os.path.exists(f'data/{key}.json')
+        assert os.path.exists(f'data/gen_{key}.json')
     
 
 
