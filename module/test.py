@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import torch, time, evaluate
 
 
@@ -13,7 +14,6 @@ class Tester:
         self.tokenizer = tokenizer
         self.device = config.device
         self.dataloader = test_dataloader
-        self.device_type = config.device_type
 
 
     @staticmethod
@@ -30,12 +30,14 @@ class Tester:
         
         start_time = time.time()
         with torch.no_grad():
-            for _, batch in enumerate(self.dataloader):   
+            for _, batch in tqdm(enumerate(self.dataloader)):   
                 
                 input_ids = batch[f'{self.src}_ids'].to(self.device)
+                attention_mask = batch[f'{self.src}_mask'].to(self.device)
                 labels = batch[f'{self.trg}_ids'].to(self.device)
                                 
-                preds = self.model.generate(input_ids, max_new_tokens=300, use_cache=True)
+                preds = self.model.generate(input_ids=input_ids, attention_mask=attention_mask,
+                                            max_new_tokens=300, use_cache=True)
                 
                 preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
                 labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
