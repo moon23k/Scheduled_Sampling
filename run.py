@@ -1,4 +1,5 @@
 import os, json, argparse, torch
+from tqdm import tqdm
 from module.data import load_dataloader
 from module.model import load_models
 from module.train import Trainer, PreTrainer
@@ -91,11 +92,10 @@ def test(config, model, tokenizer):
 def generate(config, model, split):
     generated = []
     dataloader = load_dataloader(config, split)
-    model.config.update({'decoder_start_token_id': config.pad_id})
 
     model.eval()
     with torch.no_grad():
-        for _, batch in enumerate(dataloader):   
+        for _, batch in tqdm(enumerate(dataloader)):   
             input_ids = batch[f'{config.src}_ids'].to(config.device)
             attention_mask = batch[f'{config.src}_mask'].to(config.device)
             labels = batch[f'{config.trg}_ids'].tolist()
@@ -120,6 +120,7 @@ def main(args):
     
     if generator is not None:
         setattr(config, 'pad_id', generator.config.pad_token_id)
+        generator.config.update({'decoder_start_token_id': config.pad_id})
     else:
         setattr(config, 'pad_id', discriminator.pad_id)
 

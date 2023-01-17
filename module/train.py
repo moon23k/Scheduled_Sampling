@@ -2,7 +2,7 @@ import time, math, json, torch
 import torch.nn as nn
 import torch.amp as amp
 import torch.optim as optim
-
+from collections import namedtuple
 
 
 class TrainerBase:
@@ -68,12 +68,10 @@ class Trainer(TrainerBase):
         self.gen_record_path = self.gen_ckpt.replace('.pt', '.json')
         self.dis_record_path = self.dis_ckpt.replace('.pt', '.json')
 
-
-    def split_batch(self, batch):
-        input_ids = batch[f'{self.src}_ids'].to(self.device)
-        attention_mask =  batch[f'{self.src}_mask'].to(self.device)
-        labels = batch[f'{self.trg}_ids'].to(self.device)        
-        return input_ids, attention_mask, labels        
+        self.gen_inputs = namedtuple('Generator_Inputs', 
+                                     ('input_ids', 'attention_mask', 'labels'))
+        self.dis_inputs = namedtuple('Discriminator_Inputs', 
+                                     ('input_ids', 'attention_mask', 'labels'))
 
 
     def train(self):
@@ -110,27 +108,61 @@ class Trainer(TrainerBase):
             json.dump(records, fp)
 
 
-    def get_losses(self, input_ids, attention_mask, labels):
-        batch_size = input_ids.size(0)
-        samples = self.generator.generate(input_ids=input_ids, 
-                                          max_new_tokens=labels.size(-1), 
-                                          use_cache=True)
+    def update_inputs(self, batch):
         
-        dis_inputs = torch.cat((samples, labels), dim=-1)
-        dis_labels_indice = torch.randperm(batch_size * 2)        
-        
-        dis_inputs = dis_inputs[dis_labels_indice]
-        dis_labels = dis_labels_indice[dis_labels_indice > batch_size]
+        ###Update Generator Inputs
+        gen_ids = batch[f'{self.src}_ids'].to(self.device)
+        gen_mask =  batch[f'{self.src}_mask'].to(self.device)
+        gen_labels = batch[f'{self.trg}_ids'].to(self.device)
+        #self.gen_inputs(gen_ids, gen_mask, gen_labels)
+        self.gen_inputs.input_ids = gen_ids
+        self.gen_inputs.attention_mask = gen_mask
+        self.gen_inputs.labels = gen_labels
 
+        ###Update Discriminator Inputs
+        labels = gen_labels
+        batch_size = gen_ids.size(0)
+        samples = self.generator.generate(input_ids=gen_ids,
+                                          attention_mask=gen_mask, 
+                                          max_new_tokens=gen_ids.size(1), 
+                                          use_cache=True)[:, 1:]
+
+        pad_len = samples.size(-1) - labels.size(-1)
+        if pad_len > 0:
+            pad_tensor = torch.zeros(batch_size, pad_len, dtype=torch.long)
+            labels = torch.cat((labels, pad_tensor.to(self.device)), dim=-1)
+        elif pad_len < 0:
+            pad_tensor = torch.zeros(batch_size, -pad_len, dtype=torch.long)
+            samples = torch.cat((samples, pad_tensor.to(self.device)), dim=-1)
+
+        dis_ids = torch.cat((samples, labels), dim=0)
+        dis_labels = torch.cat((torch.zeros(batch_size), 
+                                torch.ones(batch_size)), dim=0)
+        dis_mask = (dis_ids != 0).long()
+        dis_indice = torch.randperm(dis_ids.size(0))
+
+        dis_ids = dis_ids[dis_indice].to(self.device)
+        dis_mask = dis_mask[dis_indice].to(self.device)
+        dis_labels = dis_labels[dis_indice].to(self.device)
+
+        #self.dis_inputs(dis_ids, dis_mask, dis_labels)
+        self.dis_inputs.input_ids = dis_ids
+        self.dis_inputs.attention_mask = dis_mask
+        self.dis_inputs.labels = dis_labels
+
+
+
+    def get_losses(self):
         with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-            gen_loss = self.generator(input_ids=input_ids, 
-                                      attention_mask=attention_mask,
-                                      labels=labels).loss
+            gen_loss = self.generator(input_ids=self.gen_inputs.input_ids, 
+                                      attention_mask=self.gen_inputs.attention_mask,
+                                      labels=self.gen_inputs.labels).loss
 
-            dis_loss = self.discriminator(inputs_ids=dis_inputs, 
-                                          labels=dis_labels).loss
-            
-        return gen_loss + dis_loss, dis_loss
+            dis_loss = self.discriminator(input_ids=self.dis_inputs.input_ids, 
+                                          attention_mask=self.dis_inputs.attention_mask,
+                                          labels=self.dis_inputs.labels).loss
+
+        return (gen_loss + dis_loss.item()) * 0.5, dis_loss
 
 
     def train_epoch(self):
@@ -141,8 +173,8 @@ class Trainer(TrainerBase):
         self.discriminator.train()
 
         for idx, batch in enumerate(self.train_dataloader):
-            input_ids, attention_mask, labels = self.split_batch(batch)
-            gen_loss, dis_loss = self.get_losses(self, input_ids, attention_mask, labels)
+            self.update_inputs(batch)
+            gen_loss, dis_loss = self.get_losses()
 
             gen_loss = gen_loss / self.iters_to_accumulate
             dis_loss = dis_loss / self.iters_to_accumulate
@@ -183,8 +215,8 @@ class Trainer(TrainerBase):
         
         with torch.no_grad():
             for _, batch in enumerate(self.valid_dataloader):   
-                input_ids, attention_mask, labels = self.split_batch(batch)           
-                gen_loss, dis_loss = self.get_losses(self, input_ids, attention_mask, labels)
+                self.update_inputs(batch)       
+                gen_loss, dis_loss = self.get_losses()
 
                 gen_epoch_loss += gen_loss.item()
                 dis_epoch_loss += dis_loss.item()

@@ -56,13 +56,13 @@ def print_model_desc(model):
 def load_generator(config):
     if config.mode == 'pretrain':
         generator = T5ForConditionalGeneration.from_pretrained(config.model_name)
-        print(f"Generator for {config.mode} has loaded")
+        print(f"Generator for {config.mode.upper()} has loaded")
         print_model_desc(generator)
         return generator.to(config.device)
 
     generator_config = T5Config()
     generator = T5ForConditionalGeneration(generator_config)
-    print(f"Generator for {config.mode} has loaded")
+    print(f"Generator for {config.mode.upper()} has loaded")
 
     ckpt = config.gen_pre_ckpt if config.mode in ['train', 'generate'] else config.gen_ckpt
     assert os.path.exists(ckpt)
@@ -77,7 +77,7 @@ def load_generator(config):
 
 def load_discriminator(config):
     discriminator = Discriminator(config)
-    print(f"Discriminator for {config.mode} has loaded")
+    print(f"Discriminator for {config.mode.upper()} has loaded")
 
     if config.task == 'train':
         assert os.path.exists(config.dis_pre_ckpt)
