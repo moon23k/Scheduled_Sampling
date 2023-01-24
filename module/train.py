@@ -60,10 +60,6 @@ class Trainer(TrainerBase):
         self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
         
-        self.record_keys = ['epoch', 'gen_train_loss', 'gen_valid_loss',
-                            'dis_train_loss', 'dis_valid_loss',  
-                            'gen_lr', 'dis_lr', 'train_time']
-        
         self.gen_optimizer = optim.AdamW(params=self.generator.parameters(), lr=config.lr)
         self.dis_optimizer = optim.AdamW(params=self.discriminator.parameters(), lr=config.lr)
 
@@ -72,14 +68,16 @@ class Trainer(TrainerBase):
 
         self.gen_ckpt = config.gen_ckpt
         self.dis_ckpt = config.dis_ckpt
-
-        self.gen_record_path = self.gen_ckpt.replace('.pt', '.json')
-        self.dis_record_path = self.dis_ckpt.replace('.pt', '.json')
-
+        
         self.gen_inputs = namedtuple('Generator_Inputs', 
                                      ('input_ids', 'attention_mask', 'labels'))
         self.dis_inputs = namedtuple('Discriminator_Inputs', 
                                      ('input_ids', 'attention_mask', 'labels'))
+
+        self.record_path = 'ckpt/gan_train.json'
+        self.record_keys = ['epoch', 'gen_train_loss', 'gen_valid_loss',
+                            'dis_train_loss', 'dis_valid_loss',  
+                            'gen_lr', 'dis_lr', 'train_time']
 
 
     def train(self):
