@@ -2,18 +2,16 @@ from tqdm import tqdm
 import torch, time, evaluate
 
 
-
 class Tester:
     def __init__(self, config, model, tokenizer, test_dataloader):
         super(Tester, self).__init__()
         
         self.model = model
-        self.src = config.src
-        self.trg = config.trg
-        self.task = config.task
         self.tokenizer = tokenizer
-        self.device = config.device
         self.dataloader = test_dataloader
+        self.strategy = config.strategy
+        self.device = config.device
+        self.bleu = evaluate.load('bleu')
 
 
     @staticmethod
@@ -26,26 +24,27 @@ class Tester:
 
     def test(self):
         self.model.eval()
-        metric_module = evaluate.load('bleu')
-        
         start_time = time.time()
+
         with torch.no_grad():
-            for _, batch in tqdm(enumerate(self.dataloader)):   
+            for batch in tqdm(self.dataloader):   
                 
-                input_ids = batch[f'{self.src}_ids'].to(self.device)
-                attention_mask = batch[f'{self.src}_mask'].to(self.device)
-                labels = batch[f'{self.trg}_ids'].to(self.device)
+                input_ids = batch['input_ids'].to(self.device)
+                attention_mask = batch['attention_mask'].to(self.device)
+                references = batch['references']
                                 
-                preds = self.model.generate(input_ids=input_ids, attention_mask=attention_mask,
-                                            max_new_tokens=300, use_cache=True)
+                predictions = self.model.generate(input_ids=input_ids, 
+                                                  attention_mask=attention_mask,
+                                                  max_new_tokens=512, 
+                                                  use_cache=True)
                 
-                preds = self.tokenizer.batch_decode(preds, skip_special_tokens=True)
-                labels = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
+                predictions = self.tokenizer.batch_decode(predictions, 
+                                                          skip_special_tokens=True)
 
-                metric_module.add_batch(predictions=preds, 
-                                        references=[[l] for l in labels])    
+                self.bleu.add_batch(predictions=predictions, 
+                                    references=references)    
 
-        bleu_score = metric_module.compute()['bleu'] * 100
+        bleu_score = self.bleu.compute()['bleu'] * 100
 
         print('Test Results')
         print(f"  >> BLEU Score: {bleu_score:.2f}")
