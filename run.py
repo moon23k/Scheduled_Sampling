@@ -60,6 +60,14 @@ def inference(model, tokenizer):
         print(f"Model Out Sequence >> {output_seq}")       
 
 
+def train(config, model, tokenizer):
+    train_dataloader = load_dataloader(config, 'train')
+    valid_dataloader = load_dataloader(config, 'valid')    
+    trainer = Trainer(config, model, train_dataloader, valid_dataloader, 
+                      tokenizer=None if config.strategy == 'fine' else tokenizer)
+    trainer.train()
+
+
 def main(args):
     #prerequisites
     set_seed(42)
@@ -70,22 +78,32 @@ def main(args):
     
     #Train
     if config.mode == 'train':
-        train_dataloader = load_dataloader(config, 'train')
-        valid_dataloader = load_dataloader(config, 'valid')
+        if config.strategy != 'consecutive':
+            train(config, model)
 
-        if config.strategy == 'fine':
-            trainer = Trainer(config, model, train_dataloader, valid_dataloader)
-        else:
-            trainer = Trainer(config, model, train_dataloader, valid_dataloader, tokenizer)
-        trainer.train()
+        elif config.strategy == 'consecutive':
+            if not os.path.exists('ckpt/fine_model.pt'):
+                config.strategy = 'fine'
+                train(config, model, tokenizer)
+                config.strategy = 'consecutive'                                
+            else:
+                model_state = torch.load('ckpt/fine_model.pt', 
+                                         map_location=config.device)['model_state_dict']
+                model.load_state_dict(model_state)                
+
+            train(config, model, tokenizer)
+
 
     #Test
     elif config.mode == 'test':
+        assert os.path.exists(config.ckpt)
         test_dataloader = load_dataloader(config, 'test')
         tester = Tester(config, model, tokenizer, test_dataloader)
     
+
     #Inference    
     elif config.mode == 'inference':
+        assert os.path.exists(config.ckpt)
         inference(model, tokenizer)
 
 
@@ -96,7 +114,7 @@ if __name__ == '__main__':
     parser.add_argument('-mode', required=True)
     
     args = parser.parse_args()
-    assert args.strategy in ['fine', 'auxiliary', 'scheduled', 'generative']
+    assert args.strategy in ['fine', 'auxiliary', 'generative', 'consecutive']
     assert args.mode in ['train', 'test', 'inference']
 
     main(args)

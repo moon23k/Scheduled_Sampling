@@ -24,9 +24,10 @@ def print_model_desc(model):
     print(f"--- Model  Size : {check_size(model):.3f} MB\n")
 
 
+
 def load_model(config):
     model = T5ForConditionalGeneration.from_pretrained(config.mname)
-    print('')    
+    print('Pre Trained T5 Model has Loaded')    
 
     if config.mode != 'train':
         model_state = torch.torch.load(config.ckpt, map_location=config.device)['model_state_dict']

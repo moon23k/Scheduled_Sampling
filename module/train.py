@@ -1,6 +1,7 @@
-import time, math, json, torch, evaluate
+import time, json, torch, evaluate
 import torch.nn as nn
 import torch.optim as optim
+
 
 
 class Trainer:
@@ -50,6 +51,7 @@ class Trainer:
               >> Valid Loss: {record_dict['valid_loss']:.3f}""".replace(' ' * 14, ''))
 
 
+
     def get_bleu_loss(self, input_ids, attention_mask, references):
 
         predictions = self.model.generate(input_ids=input_ids,
@@ -59,6 +61,7 @@ class Trainer:
 
         predictions = self.tokenizer.batch_decode(predictions, 
                                                   skip_special_tokens=True)
+
         bleu_score = self.bleu.compute(predictions=[p.lower() for p in predictions], 
                                        references=references)['bleu']
         
@@ -74,7 +77,8 @@ class Trainer:
                           attention_mask=attention_mask,
                           labels=labels).loss
 
-    def get_loss(self, batch, idx):
+
+    def get_loss(self, batch):
         
         input_ids = batch['input_ids'].to(self.device)
         attention_mask = batch['attention_mask'].to(self.device)
@@ -91,12 +95,7 @@ class Trainer:
             bleu_loss = self.get_bleu_loss(input_ids, attention_mask, references)
             return (ce_loss + bleu_loss) * 0.5
 
-        if self.strategy == 'scheduled':
-            if idx // self.schedule_step:
-                return self.get_ce_loss(input_ids, attention_mask, labels)
-            return self.get_bleu_loss(input_ids, attention_mask, references)
-
-        if self.strategy == 'generative':
+        if self.strategy in ['generative', 'consecutive']:
             return self.get_bleu_loss(input_ids, attention_mask, references)
 
 
@@ -152,10 +151,10 @@ class Trainer:
 
         for idx, batch in enumerate(self.train_dataloader):
             idx += 1
-            loss = self.get_loss(batch, idx)            
+            loss = self.get_loss(batch)
             loss.backward()
 
-            if (idx) % self.iters_to_accumulate == 0 or idx == tot_len:
+            if idx % self.iters_to_accumulate == 0 or idx == tot_len:
                 nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.clip)
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -169,10 +168,8 @@ class Trainer:
         self.model.eval()
         epoch_loss = 0
 
-        for idx, batch in enumerate(self.valid_dataloader):
-            idx += 1
-            loss = self.get_loss(batch, idx)
+        for batch in self.valid_dataloader:
+            loss = self.get_loss(batch)
             epoch_loss += loss.item()
 
         return round(epoch_loss / len(self.valid_dataloader), 3)
-        
