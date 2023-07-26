@@ -1,41 +1,40 @@
-## NMT_GEN
-In general, in the training of the Transformer-based Seq2Seq model, the decoder is trained through the Teacher Forcing technique with Masking. Thanks to this, parallel processing is possible, which makes whole training process way much efficient. However the difficulty of learning is relativelt low because of the intervention of Teacher Forcing. In the actual translation generation process where Teacher Forcing is not applied, it is common for the performance to be lower than expected in the training session.
-Therefore, Generative Training without Teacher Forcing seems necessary for general users who have only small data but want excellent models. Of course, learning this way from scratch is not recommended because it is not only very inefficient, but also it costs a lot. However, if you are using a pre-trained model, it seems pretty doable.
-In this repo, experiments are conducted on three methods to figure out the effectiveness of Generative Training in the FineTuning process. The details are as follows.
+## NMT_ACT
+Generally, when training a Transformer-based natural language generation model, the decoder is trained using the Teacher Forcing technique with Masking. Thanks to this, parallel processing becomes possible, enabling efficient learning. However, the relative ease of training comes at the cost of lower learning difficulty. Consequently, during inference when Teacher Forcing is not applied, the model may exhibit performance lower than what was expected during the training sessions.
 
-<br>
-<br>
+To enhance the model's generation capabilities, there are approaches like increasing the model size and dataset or utilizing Generative Training on the entire dataset. However, the former requires substantial computational costs, and the latter often suffers from decreased training efficiency.
 
-## Strategies
+Therefore, this repository proposes an approach where training with Teacher Forcing is performed initially, and then Generative Training is applied only to address the deficiencies in the trained model.
 
-**General Way of FineTuning** <br>
-> Fine Tunes Pretrained Encoder-Decoder Model. Although the learning speed is fast and efficient, it shows relatively poor performance in performance evaluation.
+<br><br>
 
-<br>
+## Training Strategy
 
-**Scheduled Sampling** <br>
-> Half of it is based on teacher forcing, and half is based on generative learning technique.
-It is a sort of compromise method to compensate for the inefficiency of Generative and the low performance of Teacher Forcing.
+**1. Train Initialized Transformer Model with Teacher Forcing** <br>
+> This is the standard training approach. Cross-Entropy loss is used, enabling faster learning.
 
 <br>
 
-**Generative Training** <br>
-> Apply Generative Training only
-
+**2. Figure out Weak Points** <br>
+> Using BLEU evaluation metric to measure the actual model performance, we calculate the average BLEU score and identify data points scoring below the average. We search for challenging data and samples with semantic similarity within the Training Dataset.
 
 <br>
-<br>
+
+**3. Complementary Training** <br>
+> Conduct additional training based on a supplementary dataset. 
+  For comparison purposes, two different training methods are used: General training and Generative Training.
+
+<br><br>
 
 ## Configurations
 
-<br>
-<br>
+<br><br>
 
 ## Result
 
-<br>
-<br>
+| Model | Greedy BLEU Score | Beam BLEU Score |
+|---|---|---|
+| Base Model |-|-|
+| Complemented Model |-|-|
+| Complemented Generative Model |-|-|
 
-## Reference
-[**Scheduled Sampling for Sequence Prediction with Recurrent Neural Networks**](https://arxiv.org/abs/1506.03099)
-<br>
+<br><br>
