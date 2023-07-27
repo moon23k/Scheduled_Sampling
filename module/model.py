@@ -1,5 +1,5 @@
 import torch
-from transformers import T5ForConditionalGeneration
+from model.transformer import Transformer
 
 
 
@@ -26,11 +26,11 @@ def print_model_desc(model):
 
 
 def load_model(config):
-    model = T5ForConditionalGeneration.from_pretrained(config.mname)
-    print('Pre Trained T5 Model has Loaded')    
+    model = Transformer(config)
+    print('Initialized Transformer Model has Loaded')    
 
     if config.mode != 'train':
-        model_state = torch.torch.load(config.ckpt, map_location=config.device)['model_state_dict']
+        model_state = torch.load(config.ckpt, map_location=config.device)['model_state_dict']
         model.load_state_dict(model_state)
         print(f"Model States has loaded from {config.ckpt}")
 

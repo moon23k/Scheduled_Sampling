@@ -5,8 +5,9 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 class Dataset(torch.utils.data.Dataset):
-    def __init__(self, split):
+    def __init__(self, tokenizer, split):
         super().__init__()
+        self.tokenizer = tokenizer
         self.data = self.load_data(split)
 
     @staticmethod
@@ -19,13 +20,9 @@ class Dataset(torch.utils.data.Dataset):
         return len(self.data)
     
     def __getitem__(self, idx):
-        input_ids = self.data[idx]['input_ids']
-        attention_mask = self.data[idx]['attention_mask']
-        labels = self.data[idx]['labels']
-        reference = self.data[idx]['reference']
-        
-        return input_ids, attention_mask, labels, reference
-
+        src = self.tokenizer.encode(self.data[idx]['src']).ids
+        trg = self.tokenizer.encode(self.data[idx]['trg']).ids
+        return src, trg
 
 
 
@@ -34,31 +31,21 @@ class Collator(object):
         self.pad_id = pad_id
 
     def __call__(self, batch):
-        ids_batch, masks_batch, labels_batch, ref_batch = [], [], [], []
+        src_batch, trg_batch = zip(*batch)
         
-        for ids, masks, labels, ref in batch:
-            ids_batch.append(torch.LongTensor(ids)) 
-            masks_batch.append(torch.LongTensor(masks))
-            labels_batch.append(torch.LongTensor(labels))
-            ref_batch.append([ref])
+        return {'src': self.pad_batch(src_batch), 
+                'trg': self.pad_batch(trg_batch)}
 
-        ids_batch = self.pad_batch(ids_batch)
-        masks_batch = self.pad_batch(masks_batch)
-        labels_batch = self.pad_batch(labels_batch)
-
-        return {'input_ids': ids_batch, 
-                'attention_mask': masks_batch,
-                'labels': labels_batch,
-                'references': ref_batch}
 
     def pad_batch(self, batch):
         return pad_sequence(batch, batch_first=True, padding_value=self.pad_id)
 
 
-def load_dataloader(config, split):
-    return DataLoader(Dataset(split), 
-                      batch_size=config.batch_size, 
-                      shuffle=True if config.mode == 'train' else False,
+
+def load_dataloader(config, tokenizer, split):
+    return DataLoader(Dataset(tokenizer, config.task, split), 
+                      batch_size=config.batch_size if split!='test' else 1, 
+                      shuffle=True if split=='train' else False,
                       collate_fn=Collator(config.pad_id),
                       pin_memory=True,
                       num_workers=2)

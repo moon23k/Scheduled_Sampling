@@ -1,36 +1,56 @@
-import os, argparse, torch
+import numpy as np
+import os, yaml, random, argparse
+
+import torch
+import torch.backends.cudnn as cudnn
+
+from tokenizers import Tokenizer
+from tokenizers.processors import TemplateProcessing
+
+from module.test import Tester
+from module.train import Trainer
+from module.search import Search
 from module.model import load_model
 from module.data import load_dataloader
-from module.train import Trainer
-from module.test import Tester
-from transformers import set_seed, T5TokenizerFast
+
+
+
+
+def set_seed(SEED=42):
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
+    cudnn.benchmark = False
+    cudnn.deterministic = True
 
 
 
 class Config(object):
     def __init__(self, args):    
 
-        self.strategy = args.strategy
-        self.mode = args.mode
-        self.mname = 't5-small'
-        self.ckpt = f'ckpt/{self.strategy}_model.pt'
+        with open('config.yaml', 'r') as f:
+            params = yaml.load(f, Loader=yaml.FullLoader)
+            for group in params.keys():
+                for key, val in params[group].items():
+                    setattr(self, key, val)
 
-        self.clip = 1
-        self.lr = 5e-5
-        self.n_epochs = 10
-        self.batch_size = 16
-        self.iters_to_accumulate = 4
-        
-        self.early_stop = True
-        self.patience = 3
+        self.mode = args.mode
+        self.model_type = args.model
+        self.act_type = args.act_type
+        self.search_method = args.search
+
+        self.ckpt = f"ckpt/{self.model_type}.pt"
+        self.tokenizer_path = "data/tokenizer.json"
 
         use_cuda = torch.cuda.is_available()
         self.device_type = 'cuda' if use_cuda else 'cpu'
-        
+        self.device = torch.device(self.device_type)
+
         if self.mode == 'inference':
             self.device = torch.device('cpu')
-        else:
-            self.device = torch.device(self.device_type)
+            
 
 
     def print_attr(self):
@@ -38,8 +58,25 @@ class Config(object):
             print(f"* {attribute}: {value}")
 
 
-def inference(model, tokenizer):
-    model.eval()
+
+
+def load_tokenizer(config):
+    assert os.path.exists(tokenizer_path)
+
+    tokenizer = Tokenizer.from_file(config.tokenizer_path)    
+    tokenizer.post_processor = TemplateProcessing(
+        single=f"{config.bos_token} $A {config.eos_token}",
+        special_tokens=[(config.bos_token, config.bos_id), 
+                        (config.eos_token, config.eos_id)]
+        )
+    
+    return tokenizer
+
+
+
+def inference(config, model, tokenizer):
+    search_module = Search(config, model, tokenizer)
+
     print(f'--- Inference Process Started! ---')
     print('[ Type "quit" on user input to stop the Process ]')
     
@@ -51,70 +88,49 @@ def inference(model, tokenizer):
             print('\n--- Inference Process has terminated! ---')
             break        
 
-        #convert user input_seq into model input_ids
-        input_ids = tokenizer(input_seq)['input_ids']
-        output_ids = model.generate(input_ids, beam_size=4, max_new_tokens=300, use_cache=True)
-        output_seq = tokenizer.decode(output_ids, skip_special_tokens=True)
-
-        #Search Output Sequence
+        if config.search_method == 'beam':
+            output_seq = search_module.beam_search(input_seq)
+        else:
+            output_seq = search_module.greedy_search(input_seq)
         print(f"Model Out Sequence >> {output_seq}")       
 
 
-def train(config, model, tokenizer):
-    train_dataloader = load_dataloader(config, 'train')
-    valid_dataloader = load_dataloader(config, 'valid')    
-    trainer = Trainer(config, model, train_dataloader, valid_dataloader, 
-                      tokenizer=None if config.strategy == 'fine' else tokenizer)
-    trainer.train()
-
-
 def main(args):
-    #prerequisites
-    set_seed(42)
+    set_seed()
     config = Config(args)
     model = load_model(config)
-    tokenizer = T5TokenizerFast.from_pretrained(config.mname, model_max_length=512)
-    config.pad_id = tokenizer.pad_token_id
-    
-    #Train
+    tokenizer = load_tokenizer(config)
+
+
     if config.mode == 'train':
-        if config.strategy != 'consecutive':
-            train(config, model)
-
-        elif config.strategy == 'consecutive':
-            if not os.path.exists('ckpt/fine_model.pt'):
-                config.strategy = 'fine'
-                train(config, model, tokenizer)
-                config.strategy = 'consecutive'                                
-            else:
-                model_state = torch.load('ckpt/fine_model.pt', 
-                                         map_location=config.device)['model_state_dict']
-                model.load_state_dict(model_state)                
-
-            train(config, model, tokenizer)
-
-
-    #Test
+        train_dataloader = load_dataloader(config, tokenizer, 'train')
+        valid_dataloader = load_dataloader(config, tokenizer, 'valid')
+        trainer = Trainer(config, model, train_dataloader, valid_dataloader)
+        trainer.train()
+    
     elif config.mode == 'test':
-        assert os.path.exists(config.ckpt)
         test_dataloader = load_dataloader(config, 'test')
         tester = Tester(config, model, tokenizer, test_dataloader)
+        tester.test()
+        tester.inference_test()
     
-
-    #Inference    
     elif config.mode == 'inference':
-        assert os.path.exists(config.ckpt)
-        inference(model, tokenizer)
-
+        translator = inference(config, model, tokenizer)
+        translator.translate()
+    
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('-strategy', required=True)
     parser.add_argument('-mode', required=True)
+    parser.add_argument('-act_type', default='standard', required=False)
+    parser.add_argument('-model', default='baseline', required=False)
+    parser.add_argument('-search', default='greedy', required=False)
     
     args = parser.parse_args()
-    assert args.strategy in ['fine', 'auxiliary', 'generative', 'consecutive']
-    assert args.mode in ['train', 'test', 'inference']
+    assert args.mode in ['train', 'validate', 'act', 'test', 'inference']
+    assert args.model in ['baseline', 'act_standard', 'act_generative']
+    assert args.act_type in ['standard', 'generative']
+    assert args.search in ['greedy', 'beam']
 
     main(args)
