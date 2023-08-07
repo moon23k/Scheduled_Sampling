@@ -55,7 +55,7 @@ def train_tokenizer():
     with open('config.yaml', 'r') as f:
         vocab_config = yaml.load(f, Loader=yaml.FullLoader)['vocab']
 
-    tokenizer = Tokenizer(WordPiece(unk_token="[UNK]"))
+    tokenizer = Tokenizer(WordPiece(unk_token=vocab_config['unk_token']))
     tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
     tokenizer.pre_tokenizer = Whitespace()
     trainer = WordPieceTrainer(vocab_size=vocab_config['vocab_size'], 

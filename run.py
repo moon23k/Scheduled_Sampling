@@ -37,11 +37,10 @@ class Config(object):
                     setattr(self, key, val)
 
         self.mode = args.mode
-        self.model_type = args.model
-        self.act_type = args.act_type
+        self.train_type = args.train_type
         self.search_method = args.search
 
-        self.ckpt = f"ckpt/{self.model_type}.pt"
+        self.ckpt = f"ckpt/{self.train_type}.pt"
         self.tokenizer_path = "data/tokenizer.json"
 
         use_cuda = torch.cuda.is_available()
@@ -61,7 +60,7 @@ class Config(object):
 
 
 def load_tokenizer(config):
-    assert os.path.exists(tokenizer_path)
+    assert os.path.exists(config.tokenizer_path)
 
     tokenizer = Tokenizer.from_file(config.tokenizer_path)    
     tokenizer.post_processor = TemplateProcessing(
@@ -123,14 +122,12 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-mode', required=True)
-    parser.add_argument('-act_type', default='standard', required=False)
-    parser.add_argument('-model', default='baseline', required=False)
+    parser.add_argument('-train_type', default='standard', required=False)
     parser.add_argument('-search', default='greedy', required=False)
     
     args = parser.parse_args()
-    assert args.mode in ['train', 'validate', 'act', 'test', 'inference']
-    assert args.model in ['baseline', 'act_standard', 'act_generative']
-    assert args.act_type in ['standard', 'generative']
+    assert args.mode in ['train', 'test', 'inference']
+    assert args.train_type in ['standard', 'generative', 'complementary']
     assert args.search in ['greedy', 'beam']
 
     main(args)

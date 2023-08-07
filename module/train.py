@@ -173,3 +173,36 @@ class Trainer:
             epoch_loss += loss.item()
 
         return round(epoch_loss / len(self.valid_dataloader), 3)
+
+
+
+'''
+for num_step, data in pbar:
+    model.train()
+    inputs, labels = data
+
+    teach_forcing_tokens = labels.clone()
+    teach_forcing_tokens = torch.cat(
+        [torch.ones_like(teach_forcing_tokens[:, :1]), teach_forcing_tokens], dim=1
+    )  # adding start token
+
+    # zero the parameter gradients
+    optimizer.zero_grad()
+
+    # forward + backward + optimize
+    outputs = model(inputs, teach_forcing_tokens)
+    loss = criterion(outputs[:, :-1, :].permute(0, 2, 1), labels)
+    loss.backward()
+    optimizer.step()
+
+    pbar.set_postfix({"loss": loss})  # display loss in progress bar
+
+    if num_step == MAX_NUM_STEP:
+        break
+
+    if num_step % INTERVAL_TEST == 0:  # try inference to check that it works well
+        test_sent = create_random_sent()
+        model.eval()
+        with torch.no_grad():
+            print(f"Input {test_sent}, output: {model.predict(test_sent)}")
+'''

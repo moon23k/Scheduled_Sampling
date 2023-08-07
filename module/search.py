@@ -14,8 +14,8 @@ class Search:
         self.model = model
         self.device = model.device
 
-        self.max_len = 512
         self.beam_size = 4
+        self.max_len = config.max_len
 
         self.bos_id = config.bos_id
         self.eos_id = config.eos_id
@@ -24,12 +24,15 @@ class Search:
         self.Node = namedtuple('Node', ['prev_node', 'pred', 'log_prob', 'length'])
 
 
+
     def get_score(self, node, max_repeat=5, min_length=5, alpha=1.2): 
         if not node.log_prob:
             return node.log_prob
 
         #find max number of consecutively repeated tokens
-        repeat = max([sum(1 for token in group if token != self.pad_id) for _, group in groupby(node.pred)])
+        repeat = max(
+            [sum(1 for token in group if token != self.pad_id) for _, group in groupby(node.pred)]
+        )
 
         repeat_penalty = 0.5 if repeat > max_repeat else 1
         len_penalty = ((node.length + min_length) / (1 + min_length)) ** alpha
@@ -40,6 +43,7 @@ class Search:
         return float(score)
 
 
+
     def init_nodes(self):
         #returns [ Node, nodes, end_nodes ]
         
@@ -47,10 +51,12 @@ class Search:
         nodes = PriorityQueue()
         start_tensor = [self.bos_id]
 
-        start_node = Node(prev_node = None,
-                          pred = start_tensor,
-                          log_prob = 0.0,
-                          length = 0)
+        start_node = Node(
+            prev_node = None,
+            pred = start_tensor,
+            log_prob = 0.0,
+            length = 0
+        )
 
         for _ in range(self.beam_size):
             nodes.put((0, start_node))
@@ -86,10 +92,12 @@ class Search:
                     pred = preds[:, k].item()
                     log_prob = log_probs[:, k].item()
                     
-                    next_node = Node(prev_node = curr_node,
-                                     pred = curr_node.pred + [pred],
-                                     log_prob = curr_node.log_prob + log_prob,
-                                     length = curr_node.length + 1)
+                    next_node = Node(
+                        prev_node = curr_node,
+                        pred = curr_node.pred + [pred],
+                        log_prob = curr_node.log_prob + log_prob,
+                        length = curr_node.length + 1
+                    )
                     
                     next_score = self.get_score(next_node)                    
                     nodes.put((next_score, next_node))

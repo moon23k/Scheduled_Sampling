@@ -1,5 +1,5 @@
 import torch
-from model.transformer import Transformer
+from model.enc_dec import Transformer
 
 
 

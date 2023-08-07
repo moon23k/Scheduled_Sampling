@@ -38,14 +38,22 @@ class Collator(object):
 
 
     def pad_batch(self, batch):
-        return pad_sequence(batch, batch_first=True, padding_value=self.pad_id)
+        return pad_sequence(
+            batch, 
+            batch_first=True, 
+            padding_value=self.pad_id
+        )
 
 
 
 def load_dataloader(config, tokenizer, split):
-    return DataLoader(Dataset(tokenizer, config.task, split), 
-                      batch_size=config.batch_size if split!='test' else 1, 
-                      shuffle=True if split=='train' else False,
-                      collate_fn=Collator(config.pad_id),
-                      pin_memory=True,
-                      num_workers=2)
+    is_train = True if split == 'train' else False
+
+    return DataLoader(
+        Dataset(tokenizer, split), 
+        batch_size=config.batch_size if is_train else 1, 
+        shuffle=True if is_train else False,
+        collate_fn=Collator(config.pad_id),
+        pin_memory=True,
+        num_workers=2
+    )
