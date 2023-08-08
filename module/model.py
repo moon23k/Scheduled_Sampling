@@ -1,5 +1,14 @@
-import torch
-from model.enc_dec import Transformer
+import os, torch
+import torch.nn as nn
+from model import Transformer
+
+
+
+
+def init_weights(model):
+    for name, param in model.named_parameters():
+        if 'weight' in name and 'norm' not in name:
+            nn.init.xavier_uniform_(param)          
 
 
 
@@ -27,9 +36,12 @@ def print_model_desc(model):
 
 def load_model(config):
     model = Transformer(config)
+    init_weights(model)
     print('Initialized Transformer Model has Loaded')    
 
-    if config.mode != 'train':
+
+    if config.mode != 'train' or config.train_type == 'consecutive':
+        assert os.path.exists(config.ckpt)
         model_state = torch.load(config.ckpt, map_location=config.device)['model_state_dict']
         model.load_state_dict(model_state)
         print(f"Model States has loaded from {config.ckpt}")

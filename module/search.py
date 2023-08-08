@@ -21,7 +21,10 @@ class Search:
         self.eos_id = config.eos_id
         self.pad_id = config.pad_id
         
-        self.Node = namedtuple('Node', ['prev_node', 'pred', 'log_prob', 'length'])
+        self.Node = namedtuple(
+            'Node', 
+            ['prev_node', 'pred', 'log_prob', 'length']
+        )
 
 
 

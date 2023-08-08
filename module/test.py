@@ -7,9 +7,9 @@ class Tester:
         
         self.model = model
         self.tokenizer = tokenizer
-        self.dataloader = test_dataloader
         self.device = config.device
-        self.bleu = evaluate.load('bleu')
+        self.dataloader = test_dataloader
+        self.bleu_module = evaluate.load('bleu')
 
 
     def test(self):
@@ -22,10 +22,9 @@ class Tester:
                 labels = batch['trg'].tolist()
                                 
                 predictions = self.model.generate(input_tensor)
-                
-                predictions = self.tokenizer.batch_decode(predictions, skip_special_tokens=True)
+                predictions = self.tokenizer.batch_decode(predictions)
 
-                bleu_score = self.bleu.compute(
+                bleu_score = self.bleu_module.compute(
                     predictions=predictions, 
                     references=references
                 )['bleu'] * 100

@@ -1,22 +1,24 @@
-import numpy as np
-import os, yaml, random, argparse
-
-import torch
-import torch.backends.cudnn as cudnn
+import os, yaml, argparse, torch
 
 from tokenizers import Tokenizer
 from tokenizers.processors import TemplateProcessing
 
-from module.test import Tester
-from module.train import Trainer
-from module.search import Search
-from module.model import load_model
-from module.data import load_dataloader
+from train import Trainer
+from module import (
+    load_model, 
+    load_dataloader,
+    Tester,
+    Search
+)
 
 
 
 
 def set_seed(SEED=42):
+    import random
+    import numpy as np
+    import torch.backends.cudnn as cudnn
+
     random.seed(SEED)
     np.random.seed(SEED)
     torch.manual_seed(SEED)
@@ -24,6 +26,7 @@ def set_seed(SEED=42):
     torch.cuda.manual_seed_all(SEED)
     cudnn.benchmark = False
     cudnn.deterministic = True
+
 
 
 
@@ -73,6 +76,7 @@ def load_tokenizer(config):
 
 
 
+
 def inference(config, model, tokenizer):
     search_module = Search(config, model, tokenizer)
 
@@ -94,6 +98,8 @@ def inference(config, model, tokenizer):
         print(f"Model Out Sequence >> {output_seq}")       
 
 
+
+
 def main(args):
     set_seed()
     config = Config(args)
@@ -104,7 +110,19 @@ def main(args):
     if config.mode == 'train':
         train_dataloader = load_dataloader(config, tokenizer, 'train')
         valid_dataloader = load_dataloader(config, tokenizer, 'valid')
-        trainer = Trainer(config, model, train_dataloader, valid_dataloader)
+        
+        need_tokenizer = True if config.train_type in \
+                         ['generative', 'consecutive', 'complementary'] else False
+
+        if need_tokenizer:
+            trainer = Trainer(
+                config, model, train_dataloader, valid_dataloader
+            )
+        else:
+            trainer = Trainer(
+                config, model, train_dataloader, valid_dataloader, tokenizer
+            )
+        
         trainer.train()
     
     elif config.mode == 'test':
@@ -127,7 +145,10 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     assert args.mode in ['train', 'test', 'inference']
-    assert args.train_type in ['standard', 'generative', 'complementary']
+    assert args.train_type in [
+        'standard', 'alternate', 'generative', 
+        'consecutive', 'complementary'
+    ]
     assert args.search in ['greedy', 'beam']
 
     main(args)

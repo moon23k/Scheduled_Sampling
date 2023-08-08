@@ -3,7 +3,10 @@ import torch.nn as nn
 from torch import Tensor
 from typing import Optional
 from collections import namedtuple
-
+from model.components import (
+    DecoderLayer, 
+    generate_square_subsequent_mask
+)
 
 
 
@@ -66,9 +69,9 @@ class Decoder(nn.TransformerDecoder):
 
 
 
-class Model(nn.Module):
-    def __init__(self, vocab):
-        super(Model, self).__init__()
+class Transformer(nn.Module):
+    def __init__(self, config):
+        super(Transformer, self).__init__()
 
         self.device = config.device
         self.pad_id = config.pad_id
@@ -79,8 +82,10 @@ class Model(nn.Module):
 
         self.generator = nn.Linear(config.hidden_dim, self.vocab_size)
 
+    def forward(self):
+        return
 
-
+    '''
     def forward(self, inputs, teach_forcing_tokens):
 
         input_embed = self.positional_encoding(
@@ -105,7 +110,7 @@ class Model(nn.Module):
             )  # output_len, bsz, hdim
         else:
             tgt_mask = generate_square_subsequent_mask(
-                teach_forcing_embed.size(0), DEVICE
+                teach_forcing_embed.size(0)
             )
             decoded = self.decoder(
                 teach_forcing_embed,
@@ -176,3 +181,4 @@ class Model(nn.Module):
             )  # current_output_len, 1
 
         return self.vocab.idx_to_sent(output_tokens)
+    '''
