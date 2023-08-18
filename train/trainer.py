@@ -1,13 +1,12 @@
 import time, math, json, torch
 import torch.nn as nn
 import torch.amp as amp
-import torch.optim as optim
 
-from optim import AdamW
-from optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 from .standard import StandardTrainer
-from .alternate import AlternateTrainer
+from .shuffle import ShuffleTrainer
 from .generative import GenerativeTrainer
 from .complementary import ComplementaryTrainer
 
@@ -66,6 +65,13 @@ class TrainerBase(object):
               Valid PPL: {record_dict['valid_ppl']:.2f}\n""".replace(' ' * 14, ''))
 
 
+    def train_epoch(self):
+        pass
+
+
+    def valid_epoch(self):
+        pass
+
 
     def train(self):
         records = []
@@ -119,7 +125,10 @@ class TrainerBase(object):
 
 class Trainer(object):
     def __init__(
-        self, config, model, train_dataloader, valid_dataloader, tokenizer=None
+        self, config, model, 
+        train_dataloader, 
+        valid_dataloader, 
+        tokenizer=None
         ):
 
         if config.train_type in ['alternate', 'generative']:
@@ -132,15 +141,16 @@ class Trainer(object):
 
 
     def _get_trainer_instance(
-        self, config, model, train_dataloader, valid_dataloader
+        self, config, model, 
+        train_dataloader, valid_dataloader
         ):
         
         if config.train_type == "standard":
             return StandardTrainer(
                 config, model, train_dataloader, valid_dataloader
             )
-        elif config.train_type == "alternate":
-            return AlternateTrainer(
+        elif config.train_type == "shuffle":
+            return ShuffleTrainer(
                 config, model, self.tokenizer, train_dataloader, valid_dataloader
             )
         elif config.train_type == "generative":

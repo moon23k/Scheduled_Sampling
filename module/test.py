@@ -33,3 +33,14 @@ class Tester:
         print('Test Results')
         print(f"  >> BLEU Score: {bleu_score:.2f}")
     
+
+    def predict(self, x):
+        return
+
+
+    def tokenize(self, x):
+        return
+
+    
+    def evaluate(self, x):
+        return

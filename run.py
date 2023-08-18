@@ -8,7 +8,7 @@ from module import (
     load_model, 
     load_dataloader,
     Tester,
-    Search
+    Generator
 )
 
 
@@ -47,11 +47,10 @@ class Config(object):
         self.tokenizer_path = "data/tokenizer.json"
 
         use_cuda = torch.cuda.is_available()
-        self.device_type = 'cuda' if use_cuda else 'cpu'
+        self.device_type = 'cuda' \
+                           if use_cuda and self.mode != 'inference' \
+                           else 'cpu'
         self.device = torch.device(self.device_type)
-
-        if self.mode == 'inference':
-            self.device = torch.device('cpu')
             
 
 
@@ -77,28 +76,6 @@ def load_tokenizer(config):
 
 
 
-def inference(config, model, tokenizer):
-    search_module = Search(config, model, tokenizer)
-
-    print(f'--- Inference Process Started! ---')
-    print('[ Type "quit" on user input to stop the Process ]')
-    
-    while True:
-        input_seq = input('\nUser Input Sequence >> ').lower()
-
-        #End Condition
-        if input_seq == 'quit':
-            print('\n--- Inference Process has terminated! ---')
-            break        
-
-        if config.search_method == 'beam':
-            output_seq = search_module.beam_search(input_seq)
-        else:
-            output_seq = search_module.greedy_search(input_seq)
-        print(f"Model Out Sequence >> {output_seq}")       
-
-
-
 
 def main(args):
     set_seed()
@@ -111,30 +88,25 @@ def main(args):
         train_dataloader = load_dataloader(config, tokenizer, 'train')
         valid_dataloader = load_dataloader(config, tokenizer, 'valid')
         
-        need_tokenizer = True if config.train_type in \
-                         ['generative', 'consecutive', 'complementary'] else False
-
-        if need_tokenizer:
-            trainer = Trainer(
-                config, model, train_dataloader, valid_dataloader
-            )
+        if config.train_type == 'standard':
+            trainer = Trainer(config, model, train_dataloader, valid_dataloader)
         else:
-            trainer = Trainer(
-                config, model, train_dataloader, valid_dataloader, tokenizer
-            )
-        
+            trainer = Trainer(config, model, train_dataloader, valid_dataloader, tokenizer)
+
         trainer.train()
     
+
     elif config.mode == 'test':
         test_dataloader = load_dataloader(config, 'test')
         tester = Tester(config, model, tokenizer, test_dataloader)
         tester.test()
-        tester.inference_test()
     
+
     elif config.mode == 'inference':
-        translator = inference(config, model, tokenizer)
-        translator.translate()
+        generator = Generator(config, model, tokenizer)
+        generator.inference()
     
+
 
 
 if __name__ == '__main__':
@@ -146,7 +118,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     assert args.mode in ['train', 'test', 'inference']
     assert args.train_type in [
-        'standard', 'alternate', 'generative', 
+        'standard', 'shuffle', 'generative', 
         'consecutive', 'complementary'
     ]
     assert args.search in ['greedy', 'beam']

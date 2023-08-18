@@ -39,7 +39,6 @@ def load_model(config):
     init_weights(model)
     print('Initialized Transformer Model has Loaded')    
 
-
     if config.mode != 'train' or config.train_type == 'consecutive':
         assert os.path.exists(config.ckpt)
         model_state = torch.load(config.ckpt, map_location=config.device)['model_state_dict']

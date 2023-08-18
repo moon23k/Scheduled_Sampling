@@ -42,7 +42,7 @@ class Embeddings(nn.Module):
 
 
 
-def generate_square_subsequent_mask(sz: int, device: str = "cpu") -> torch.Tensor:
+def generate_square_subsequent_mask(sz: int, device: str = "cpu"):
     """ Generate the attention mask for causal decoding """
     mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
     mask = (

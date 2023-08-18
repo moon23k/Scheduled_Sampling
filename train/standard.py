@@ -6,17 +6,25 @@ from .trainer import TrainerBase
 
 class StandardTrainer(TrainerBase):
 	def __init__(
-        self, config, model, train_dataloader, valid_dataloader
+        self, 
+        config, 
+        model, 
+        train_dataloader, 
+        valid_dataloader
     ):
 		
         super(StandardTrainer, self).__init__(
-            config, model, train_dataloader, valid_dataloader
+            config, 
+            model, 
+            train_dataloader, 
+            valid_dataloader
         )
 
 		self.criterion = nn.CrossEntropyLoss()
 
 
-    def get_loss(self):
+    def get_loss(self, logit, label):
+        loss = self.criterion(logit, label)
         return loss
 
 

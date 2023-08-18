@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from typing import Optional
-from collections import namedtuple
-from model.components import (
+from .components import (
     DecoderLayer, 
     generate_square_subsequent_mask
 )
@@ -34,7 +33,7 @@ class Decoder(nn.TransformerDecoder):
         memory_mask: Optional[Tensor] = None,
         tgt_key_padding_mask: Optional[Tensor] = None,
         memory_key_padding_mask: Optional[Tensor] = None,
-    ) -> Tensor:
+    ):
 
         output = tgt
 
@@ -74,16 +73,44 @@ class Transformer(nn.Module):
         super(Transformer, self).__init__()
 
         self.device = config.device
+        self.bos_id = config.bos_id
         self.pad_id = config.pad_id
+        self.max_len = config.max_len
         self.vocab_size = config.vocab_size
 
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
-
         self.generator = nn.Linear(config.hidden_dim, self.vocab_size)
+
 
     def forward(self):
         return
+
+
+    def encode(self, x, x_mask):
+        return self.encoder(x, x_mask)
+
+
+    def decode(self, x, memory, x_mask, e_mask):
+        return self.decoder(x, memory, x_mask, e_mask)
+
+
+    def predict(self, x):
+        batch_size = x.size(0)
+
+        x_mask = self.pad_mask(x)
+        memory = self.encode(x, x_mask)
+        
+        pred = torch.LongTensor(batch_size, self.max_len, self.vocab_size)
+        pred = pred.fill_(self.pad_id).to(self.device)
+        pred[:, 0] = self.bos_id
+
+        for t in range(1, self.max_len):
+            d_mask = self.model.dec_mask(pred)
+            d_out = self.model.decode(pred, memory, x_mask, d_mask)
+
+
+        return pred
 
     '''
     def forward(self, inputs, teach_forcing_tokens):
