@@ -14,23 +14,13 @@ Therefore, this repository proposes an approach where training with Teacher Forc
 
 <br>
 
-**2. Alternate Training** <br>
-> Alternate Training is a hybrid approach that combines Standard Training and Generative Training. It predominantly employs Standard Training but incorporates Generative Training for specific data instances. This methodology efficiently blends the strengths and weaknesses of Standard Training, known for its speed yet mild learning drive, and Generative Training, recognized for its slower yet robust learning drive.
+**2. Mixed Training** <br>
+> Mixed Training is a hybrid approach that combines Standard Training and Generative Training. It predominantly employs Standard Training but incorporates Generative Training for specific data instances. This methodology efficiently blends the strengths and weaknesses of Standard Training, known for its speed yet mild learning drive, and Generative Training, recognized for its slower yet robust learning drive.
 
 <br>
 
 **3. Generative** <br>
 > Generative Training involves generating sequences directly without Teacher Forcing, comparing the outcomes with actual labels, and updating the model's parameters accordingly. This learning approach employs Bleu Score in the Loss function, ensuring alignment between real-world usage and the learning process. However, it does come with the drawback of being time-consuming during the generation process. To address this, the Decoder utilizes caching while generating.
-
-<br>
-
-**4. Consecutive** <br>
->
- 
-<br>
-
-**5. Complementary** <br>
-> 
 
 <br><br>
 
@@ -45,8 +35,6 @@ Therefore, this repository proposes an approach where training with Teacher Forc
 | Standard      | - | - |
 | Alternate     | - | - |
 | Generative    | - | - |
-| Consecutive   | - | - |
-| Complementary | - | - |
 
 <br><br>
 
