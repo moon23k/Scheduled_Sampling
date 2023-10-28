@@ -1,211 +1,160 @@
-import torch
+import copy, math, torch
 import torch.nn as nn
-from torch import Tensor
-from typing import Optional
-from .components import (
-    DecoderLayer, 
-    generate_square_subsequent_mask
-)
+from collections import namedtuple
+
+
+
+def clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, config, max_len=512):
+        super(PositionalEncoding, self).__init__()
+        
+        pe = torch.zeros(max_len, config.emb_dim)
+        
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, config.emb_dim, 2) * -(math.log(10000.0) / config.emb_dim))
+        
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+
+        self.register_buffer('pe', pe)
+        
+
+    def forward(self, x):
+        return x + self.pe[:, :x.size(1)]
+
+
+
+class Embeddings(nn.Module):
+    def __init__(self, config):
+        super(Embeddings, self).__init__()
+
+        self.tok_emb = nn.Embedding(config.vocab_size, config.emb_dim)
+        self.scale = math.sqrt(config.emb_dim)
+
+        self.pos_emb = PositionalEncoding(config)
+        self.pos_dropout = nn.Dropout(config.dropout_ratio)
+
+        self.use_fc_layer = (config.emb_dim != config.hidden_dim)
+        if self.use_fc_layer:
+            self.fc = nn.Linear(config.emb_dim, config.hidden_dim)
+            self.fc_dropout = nn.Dropout(config.dropout_ratio)
+
+
+    def forward(self, x):
+        out = self.tok_emb(x) * self.scale
+        out = self.pos_dropout(self.pos_emb(out))
+
+        if not self.use_fc_layer:
+            return out
+        return self.fc_dropout(self.fc(out))
 
 
 
 class Encoder(nn.Module):
     def __init__(self, config):
-        self.layer
+        super(Encoder, self).__init__()
+
+        layer = nn.TransformerEncoderLayer(
+            d_model=config.hidden_dim,
+            nhead=config.n_heads,
+            dim_feedforward=config.pff_dim,
+            dropout=config.dropout_ratio,
+            activation='gelu',
+            batch_first=True
+        )
+
+        self.embeddings = Embeddings(config)
+        self.layers = clones(layer, config.n_layers)
 
 
-    def forward(self, x):
-        return
+    def forward(self, x, e_mask):
+        x = self.embeddings(x)
+        for layer in self.layers:
+            x = layer(x, src_key_padding_mask=e_mask)
+        return x
 
 
 
-
-class Decoder(nn.TransformerDecoder):
+class Decoder(nn.Module):
     def __init__(self, config):
-        self.layer = DecoderLayer(config)
+        super(Decoder, self).__init__()
+
+        layer = nn.TransformerDecoderLayer(
+            d_model=config.hidden_dim,
+            nhead=config.n_heads,
+            dim_feedforward=config.pff_dim,
+            dropout=config.dropout_ratio,
+            activation='gelu',
+            batch_first=True
+        )
+
+        self.embeddings = Embeddings(config)
+        self.layers = clones(layer, config.n_layers)
 
 
-    def forward(
-        self,
-        tgt: Tensor,
-        memory: Optional[Tensor] = None,
-        cache: Optional[Tensor] = None,
-        memory_mask: Optional[Tensor] = None,
-        tgt_key_padding_mask: Optional[Tensor] = None,
-        memory_key_padding_mask: Optional[Tensor] = None,
-    ):
-
-        output = tgt
-
-        if self.training:
-            if cache is not None:
-                raise ValueError("cache parameter should be None in training mode")
-            for mod in self.layers:
-                output = mod(
-                    output,
-                    memory,
-                    memory_mask=memory_mask,
-                    tgt_key_padding_mask=tgt_key_padding_mask,
-                    memory_key_padding_mask=memory_key_padding_mask,
-                )
-
-            return output
-
-        new_token_cache = []
-        for i, mod in enumerate(self.layers):
-            output = mod(output, memory)
-            new_token_cache.append(output)
-            if cache is not None:
-                output = torch.cat([cache[i], output], dim=0)
-
-        if cache is not None:
-            new_cache = torch.cat([cache, torch.stack(new_token_cache, dim=0)], dim=1)
-        else:
-            new_cache = torch.stack(new_token_cache, dim=0)
-
-        return output, new_cache
-
+    def forward(self, x, memory, e_mask, d_mask):
+        x = self.embeddings(x)
+        for layer in self.layers:
+            x = layer(x, memory, memory_key_padding_mask=e_mask, tgt_mask=d_mask)
+        return x
 
 
 
 class Transformer(nn.Module):
     def __init__(self, config):
         super(Transformer, self).__init__()
-
-        self.device = config.device
-        self.bos_id = config.bos_id
+        
         self.pad_id = config.pad_id
-        self.max_len = config.max_len
+        self.device = config.device
         self.vocab_size = config.vocab_size
-
+        
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
-        self.generator = nn.Linear(config.hidden_dim, self.vocab_size)
+
+        self.generator = nn.Linear(config.hidden_dim, config.vocab_size)
+        self.criterion = nn.CrossEntropyLoss()
+        self.out = namedtuple('Out', 'logit loss')
 
 
-    def forward(self):
-        return
+    def pad_mask(self, x):
+        return x == self.pad_id
+    
+
+    def dec_mask(self, x):
+        sz = x.size(1)
+        mask = torch.triu(torch.full((sz, sz), float('-inf')), diagonal=1)
+        return mask.to(self.device)
 
 
-    def encode(self, x, x_mask):
-        return self.encoder(x, x_mask)
+    @staticmethod
+    def shift_trg(x):
+        return x[:, :-1], x[:, 1:]
 
 
-    def decode(self, x, memory, x_mask, e_mask):
-        return self.decoder(x, memory, x_mask, e_mask)
+    def forward(self, x, y):
+        y, label = self.shift_trg(y)
 
-
-    def predict(self, x):
-        batch_size = x.size(0)
-
-        x_mask = self.pad_mask(x)
-        memory = self.encode(x, x_mask)
+        #Masking
+        e_mask = self.pad_mask(x)
+        d_mask = self.dec_mask(y)
         
-        pred = torch.LongTensor(batch_size, self.max_len, self.vocab_size)
-        pred = pred.fill_(self.pad_id).to(self.device)
-        pred[:, 0] = self.bos_id
+        #Actual Processing
+        memory = self.encoder(x, e_mask)
+        dec_out = self.decoder(y, memory, e_mask, d_mask)
+        logit = self.generator(dec_out)
+        
 
-        for t in range(1, self.max_len):
-            d_mask = self.model.dec_mask(pred)
-            d_out = self.model.decode(pred, memory, x_mask, d_mask)
-
-
-        return pred
-
-    '''
-    def forward(self, inputs, teach_forcing_tokens):
-
-        input_embed = self.positional_encoding(
-            self.embedding(inputs).permute(1, 0, 2)
-        )  # input_len, bsz, hdim
-
-        teach_forcing_embed = self.positional_encoding(
-            self.embedding(teach_forcing_tokens).permute(1, 0, 2)
-        )  # output_len, bsz, hdim
-
-        memory_mask = inputs == 0  # for source padding masks
-
-        encoded = self.encoder(
-            input_embed, src_key_padding_mask=memory_mask
-        )  # input_len, bsz, hdim
-
-        if USE_OPTIMIZED_DECODER:
-            decoded = self.decoder(
-                teach_forcing_embed,
-                memory=encoded,
-                memory_key_padding_mask=memory_mask,
-            )  # output_len, bsz, hdim
-        else:
-            tgt_mask = generate_square_subsequent_mask(
-                teach_forcing_embed.size(0)
-            )
-            decoded = self.decoder(
-                teach_forcing_embed,
-                encoded,
-                tgt_mask=tgt_mask,
-                memory_key_padding_mask=memory_mask,
-            )  # output_len, bsz, hdim
-
-        logits = self.classification_layer(decoded)  # output_len, bsz, vocab_size
-        return logits.permute(1, 0, 2)  # bsz, output_len, vocab_size
-
-    def predict(self, sent: str):
-        """ Used for inference """
-
-        sent_idx = self.vocab.sent_to_idx(sent)
-        sent_tensor = torch.LongTensor(sent_idx).to(DEVICE).unsqueeze(0)
-
-        input_embed = self.positional_encoding(
-            self.embedding(sent_tensor).permute(1, 0, 2)
-        )  # input_len, 1, hdim
-
-        memory_mask = sent_tensor == 0  # for source padding masks
-
-        encoded = self.encoder(
-            input_embed, src_key_padding_mask=memory_mask
-        )  # input_len, 1, hdim
-
-        decoded_tokens = (
-            torch.LongTensor([self.vocab.idx_start_token]).to(DEVICE).unsqueeze(1)
-        )  # 1, 1
-
-        output_tokens = []
-        cache = None
-        # generation loop
-        while len(output_tokens) < 256:  # max length of generation
-
-            decoded_embedding = self.positional_encoding(self.embedding(decoded_tokens))
-
-            if USE_OPTIMIZED_DECODER:
-                decoded, cache = self.decoder(
-                    decoded_embedding,
-                    encoded,
-                    cache,
-                    memory_key_padding_mask=memory_mask,
-                )
-            else:
-                tgt_mask = generate_square_subsequent_mask(
-                    decoded_tokens.size(0), DEVICE
-                )
-                decoded = self.decoder(
-                    decoded_embedding,
-                    encoded,
-                    tgt_mask=tgt_mask,
-                    memory_key_padding_mask=memory_mask,
-                )
-
-            logits = self.classification_layer(decoded[-1, :, :])  # 1, vocab_size
-            new_token = logits.argmax(1).item()
-            
-            if new_token == self.vocab.idx_end_token:  # end of generation
-                break
-
-            output_tokens.append(new_token)
-            decoded_tokens = torch.cat(
-                [decoded_tokens,
-                 torch.LongTensor([new_token]).unsqueeze(1).to(DEVICE)],
-                dim=0,
-            )  # current_output_len, 1
-
-        return self.vocab.idx_to_sent(output_tokens)
-    '''
+        #Getting Outputs
+        self.out.logit = logit
+        self.out.loss = self.criterion(
+            logit.contiguous().view(-1, self.vocab_size), 
+            label.contiguous().view(-1)
+        )
+        
+        return self.out

@@ -35,15 +35,16 @@ def print_model_desc(model):
 
 
 def load_model(config):
+    ckpt = config.ckpt
     model = Transformer(config)
     init_weights(model)
     print('Initialized Transformer Model has Loaded')    
 
-    if config.mode != 'train' or config.train_type == 'consecutive':
-        assert os.path.exists(config.ckpt)
-        model_state = torch.load(config.ckpt, map_location=config.device)['model_state_dict']
+    if config.mode != 'train':
+        assert os.path.exists(ckpt)
+        model_state = torch.load(ckpt, map_location=config.device)['model_state_dict']
         model.load_state_dict(model_state)
-        print(f"Model States has loaded from {config.ckpt}")
+        print(f"Model States has loaded from {ckpt}")
 
     print_model_desc(model)
     return model.to(config.device)

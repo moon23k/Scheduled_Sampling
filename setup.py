@@ -1,90 +1,227 @@
-import os, re, json, yaml
+import os, re, json, yaml, argparse
 from datasets import load_dataset
-from tokenizers.models import WordPiece
+from tokenizers.models import BPE
 from tokenizers import Tokenizer, normalizers
-from tokenizers.trainers import WordPieceTrainer
+from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.normalizers import NFD, Lowercase, StripAccents
 
 
 
 
-def process_data(orig_data, volumn=101100):
+#NMT
+def process_translation_data(data_volumn=101100):
+    #load original dataset
+    nmt_data = load_dataset('wmt14', 'de-en', split='train')['translation']
+    
     min_len = 10 
     max_len = 300
     max_diff = 50
-
     volumn_cnt = 0
+
     corpus, processed = [], []
     
-    for elem in orig_data:
+    for elem in nmt_data:
         temp_dict = dict()
-        src, trg = elem['en'].lower(), elem['de'].lower()
-        src_len, trg_len = len(src), len(trg)
+        x, y = elem['en'].strip().lower(), elem['de'].strip().lower()
+        x_len, y_len = len(x), len(y)
 
-        #define filtering conditions
-        min_condition = (src_len >= min_len) & (trg_len >= min_len)
-        max_condition = (src_len <= max_len) & (trg_len <= max_len)
-        dif_condition = abs(src_len - trg_len) < max_diff
+        #Filtering Conditions
+        min_condition = (x_len >= min_len) & (y_len >= min_len)
+        max_condition = (x_len <= max_len) & (y_len <= max_len)
+        dif_condition = abs(x_len - y_len) < max_diff
 
         if max_condition & min_condition & dif_condition:
-            temp_dict['src'] = src
-            temp_dict['trg'] = trg
-            processed.append(temp_dict)
-            corpus.append(src)
-            corpus.append(trg)
+            corpus.append(x)
+            corpus.append(y)
+            processed.append({'x': x, 'y':y})
             
             #End condition
             volumn_cnt += 1
-            if volumn_cnt == volumn:
+            if volumn_cnt == data_volumn:
                 break
 
-    with open('data/corpus.txt', 'w') as f:
+    #Save Corpus
+    with open('data/translation/corpus.txt', 'w') as f:
         f.write('\n'.join(corpus))
+
+    return processed 
+
+
+
+#Dialog
+def process_dialogue_data():
+    corpus, processed = [], []
+
+    #Load original Datasets
+    daily_data = load_dataset('daily_dialog')
+    blend_data = load_dataset('blended_skill_talk')
+
+
+    #Daily-Dialogue Dataset Processing
+    x_data, y_data = [], []
+    for split in ['train', 'validation', 'test']:
+        for dial in daily_data[split]['dialog']:
+            dial_list = []
+            dial_turns = len(dial)
+
+            if max([len(d) for d in dial]) > 300:
+                continue
+            
+            for uttr in dial:
+                _uttr = re.sub(r"\s([?,.!’](?:\s|$))", r'\1', uttr)
+                _uttr = re.sub(r'([’])\s+', r'\1', _uttr).strip().lower()
+                if len(_uttr) > 300:
+                    break
+                dial_list.append(_uttr)
+            
+            if dial_turns < 2:
+                continue
+
+            elif dial_turns == 2:
+                x_data.append(dial_list[0])
+                y_data.append(dial_list[1])
+                continue  #To avoid duplicate on below condition
+
+            #Incase of dial_turns is even
+            elif dial_turns % 2 == 0:
+                x_data.extend(dial_list[0::2])
+                y_data.extend(dial_list[1::2])
+
+                x_data.extend(dial_list[1:-1:2])
+                y_data.extend(dial_list[2::2])
+            
+            #Incase of dial_turns is odds
+            elif dial_turns % 2 == 1:
+                x_data.extend(dial_list[0:-1:2])
+                y_data.extend(dial_list[1::2])
+                
+                x_data.extend(dial_list[1::2])
+                y_data.extend(dial_list[2::2])   
+
+
+    assert len(x_data) == len(y_data)
+    for x, y in zip(x_data, y_data):        
+        corpus.append(x)
+        corpus.append(y)
+        processed.append({'x': x, 'y': y})
+
+
+    #Blend Skill Dataset Processing
+    for split in ['train', 'validation', 'test']:
+        for elem in blend_data[split]:
+            prevs = elem['previous_utterance']
+
+            first_uttr = prevs[0].strip().lower()
+            second_uttr = prevs[1].strip().lower()
+            third_uttr = elem['free_messages'][0].lower()
+
+            corpus.append(first_uttr)
+            corpus.append(second_uttr)
+            corpus.append(third_uttr)
+
+            processed.append({'x': first_uttr, 'y': second_uttr})
+            processed.append({'x': second_uttr, 'y': third_uttr})
+    
+
+    #Save Corpus
+    with open('data/dialogue/corpus.txt', 'w') as f:
+        f.write('\n'.join(corpus))    
 
     return processed
 
 
 
+#Summarization
+def process_summarization_data(data_volumn=101100):    
+    volumn_cnt = 0
+    corpus, processed = [], []
+    min_len, max_len = 500, 3000
 
-def train_tokenizer():
-    corpus_path = 'data/corpus.txt'
+    #Load Original Dataset
+    cnn_data = load_dataset('cnn_dailymail', '3.0.0')
+
+    for split in ['train', 'validation', 'test']:
+        for elem in cnn_data[split]:
+
+            x, y = elem['article'], elem['highlights']
+
+            if min_len < len(x) < max_len:
+                if len(y) < min_len:
+                    
+                    #Lowercase
+                    x, y = x.lower(), y.lower()
+
+                    #Remove unnecessary characters in trg sequence
+                    y = re.sub(r'\n', ' ', y)                 #remove \n
+                    y = re.sub(r"\s([.](?:\s|$))", r'\1', y)  #remove whitespace in front of dot
+
+                    processed.append({'x': x, 'y': y})
+                    corpus.append(x)
+                    corpus.append(y)
+
+                    #End Condition
+                    volumn_cnt += 1
+            if volumn_cnt == data_volumn:
+                break
+
+    with open('data/summarization/corpus.txt', 'w') as f:
+        f.write('\n'.join(corpus))
+    
+    return processed           
+
+
+
+def train_tokenizer(task):
+    corpus_path = f'data/{task}/corpus.txt'
     assert os.path.exists(corpus_path)
     
     assert os.path.exists('config.yaml')
     with open('config.yaml', 'r') as f:
         vocab_config = yaml.load(f, Loader=yaml.FullLoader)['vocab']
 
-    tokenizer = Tokenizer(WordPiece(unk_token=vocab_config['unk_token']))
+    tokenizer = Tokenizer(BPE(unk_token=vocab_config['unk_token']))
     tokenizer.normalizer = normalizers.Sequence([NFD(), Lowercase(), StripAccents()])
     tokenizer.pre_tokenizer = Whitespace()
-    trainer = WordPieceTrainer(vocab_size=vocab_config['vocab_size'], 
-                               special_tokens=[vocab_config['pad_token'], 
-                                               vocab_config['unk_token'],
-                                               vocab_config['bos_token'],
-                                               vocab_config['eos_token']])
+    trainer = BpeTrainer(
+        vocab_size=vocab_config['vocab_size'], 
+        special_tokens=[
+            vocab_config['pad_token'], 
+            vocab_config['unk_token'],
+            vocab_config['bos_token'],
+            vocab_config['eos_token']
+            ]
+        )
 
     tokenizer.train(files=[corpus_path], trainer=trainer)
-    tokenizer.save("data/tokenizer.json")
+    tokenizer.save(f"data/{task}/tokenizer.json")
 
 
 
-def save_data(data_obj):
+def save_data(task, data_obj):
     #split data into train/valid/test sets
     train, valid, test = data_obj[:-1100], data_obj[-1100:-100], data_obj[-100:]
     data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
 
     for key, val in data_dict.items():
-        with open(f'data/{key}.json', 'w') as f:
+        with open(f'data/{task}/{key}.json', 'w') as f:
             json.dump(val, f)        
-        assert os.path.exists(f'data/{key}.json')
+        assert os.path.exists(f'data/{task}/{key}.json')
 
 
 
 
-def main():
-    orig_data = load_dataset('wmt14', 'de-en', split='train')['translation']
-    processed = process_data(orig_data)
+def main(task):
+    #Prerequisite
+    os.makedirs(f'data/{task}', exist_ok=True)
+
+    #PreProcess Data
+    if task == 'translation':
+        processed = process_translation_data()
+    elif task == 'dialogue':
+        processed = process_dialogue_data()
+    elif task == 'summarization':
+        processed = process_summarization_data()        
 
     #Train Tokenizer
     train_tokenizer(task)
@@ -95,4 +232,14 @@ def main():
 
 
 if __name__ == '__main__':
-        main()    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-task', required=True)
+    
+    args = parser.parse_args()
+    assert args.task in ['all', 'translation', 'dialogue', 'summarization']
+    
+    if args.task == 'all':
+        for task in ['translation', 'dialogue', 'summarization']:
+            main(task)
+    else: 
+        main(args.task)    
