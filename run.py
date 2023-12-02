@@ -42,7 +42,7 @@ class Config(object):
         self.sampling_ratio = args.sampling_ratio
         self.search_method = args.search
 
-        self.ckpt = f"ckpt/{self.task}/sampling_{str(self.sampling_ratio)[-1]}0_model.pt"
+        self.ckpt = f"ckpt/{self.task}/sampling_{str(self.sampling_ratio)[-1]}0_perc_model.pt"
         self.tokenizer_path = f'data/{self.task}/tokenizer.json'
 
         use_cuda = torch.cuda.is_available()
@@ -107,13 +107,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     assert args.task in ['translation', 'dialogue', 'summarization']
     assert args.mode in ['train', 'test', 'inference']
-    assert 0 <= args.sampling_ratio <= 1
+    assert 0 <= args.sampling_ratio <= 0.5
     assert args.search in ['greedy', 'beam']
 
     if args.mode == 'train':
         os.makedirs(f"ckpt/{args.task}", exist_ok=True)
     else:
-        ckpt = f"ckpt/{args.task}/sampling_{str(args.sampling_ratio)[-1]}0_model.pt"
+        ckpt = f"ckpt/{args.task}/sample_{str(args.sampling_ratio)[-1]}0_perc_model.pt"
         assert os.path.exists(ckpt)
+
 
     main(args)

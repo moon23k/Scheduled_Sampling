@@ -2,4 +2,4 @@ from .data import load_dataloader
 from .model import load_model
 from .train import Trainer
 from .test import Tester
-from .generator import Generator
+from .generate import Generator

@@ -10,7 +10,7 @@ from tokenizers.normalizers import NFD, Lowercase, StripAccents
 
 
 #NMT
-def process_translation_data(data_volumn=101100):
+def process_translation_data(data_volumn):
     #load original dataset
     nmt_data = load_dataset('wmt14', 'de-en', split='train')['translation']
     
@@ -50,12 +50,12 @@ def process_translation_data(data_volumn=101100):
 
 
 #Dialog
-def process_dialogue_data():
+def process_dialogue_data(data_volumn):
+    volumn_cnt = 0
     corpus, processed = [], []
 
     #Load original Datasets
     daily_data = load_dataset('daily_dialog')
-    blend_data = load_dataset('blended_skill_talk')
 
 
     #Daily-Dialogue Dataset Processing
@@ -101,29 +101,17 @@ def process_dialogue_data():
 
 
     assert len(x_data) == len(y_data)
+    
     for x, y in zip(x_data, y_data):        
         corpus.append(x)
         corpus.append(y)
         processed.append({'x': x, 'y': y})
 
+        volumn_cnt += 1
+        if volumn_cnt == data_volumn:
+            break        
 
-    #Blend Skill Dataset Processing
-    for split in ['train', 'validation', 'test']:
-        for elem in blend_data[split]:
-            prevs = elem['previous_utterance']
-
-            first_uttr = prevs[0].strip().lower()
-            second_uttr = prevs[1].strip().lower()
-            third_uttr = elem['free_messages'][0].lower()
-
-            corpus.append(first_uttr)
-            corpus.append(second_uttr)
-            corpus.append(third_uttr)
-
-            processed.append({'x': first_uttr, 'y': second_uttr})
-            processed.append({'x': second_uttr, 'y': third_uttr})
     
-
     #Save Corpus
     with open('data/dialogue/corpus.txt', 'w') as f:
         f.write('\n'.join(corpus))    
@@ -133,10 +121,10 @@ def process_dialogue_data():
 
 
 #Summarization
-def process_summarization_data(data_volumn=101100):    
+def process_summarization_data(data_volumn):    
     volumn_cnt = 0
     corpus, processed = [], []
-    min_len, max_len = 500, 3000
+    min_len, max_len = 500, 2300
 
     #Load Original Dataset
     cnn_data = load_dataset('cnn_dailymail', '3.0.0')
@@ -200,7 +188,7 @@ def train_tokenizer(task):
 
 def save_data(task, data_obj):
     #split data into train/valid/test sets
-    train, valid, test = data_obj[:-1100], data_obj[-1100:-100], data_obj[-100:]
+    train, valid, test = data_obj[:-5100], data_obj[-5100:-100], data_obj[-100:]
     data_dict = {k:v for k, v in zip(['train', 'valid', 'test'], [train, valid, test])}
 
     for key, val in data_dict.items():
@@ -216,12 +204,13 @@ def main(task):
     os.makedirs(f'data/{task}', exist_ok=True)
 
     #PreProcess Data
+    data_volumn = 55100
     if task == 'translation':
-        processed = process_translation_data()
+        processed = process_translation_data(data_volumn)
     elif task == 'dialogue':
-        processed = process_dialogue_data()
+        processed = process_dialogue_data(data_volumn)
     elif task == 'summarization':
-        processed = process_summarization_data()        
+        processed = process_summarization_data(data_volumn)        
 
     #Train Tokenizer
     train_tokenizer(task)

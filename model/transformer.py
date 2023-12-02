@@ -1,4 +1,4 @@
-import copy, math, torch
+import copy, math, random, torch
 import torch.nn as nn
 from collections import namedtuple
 
@@ -16,7 +16,9 @@ class PositionalEncoding(nn.Module):
         pe = torch.zeros(max_len, config.emb_dim)
         
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, config.emb_dim, 2) * -(math.log(10000.0) / config.emb_dim))
+        div_term = torch.exp(
+            torch.arange(0, config.emb_dim, 2) * -(math.log(10000.0) / config.emb_dim)
+        )
         
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
@@ -101,7 +103,11 @@ class Decoder(nn.Module):
     def forward(self, x, memory, e_mask, d_mask):
         x = self.embeddings(x)
         for layer in self.layers:
-            x = layer(x, memory, memory_key_padding_mask=e_mask, tgt_mask=d_mask)
+            x = layer(
+                x, memory, 
+                memory_key_padding_mask=e_mask, 
+                tgt_mask=d_mask
+            )
         return x
 
 
@@ -111,15 +117,20 @@ class Transformer(nn.Module):
         super(Transformer, self).__init__()
         
         self.pad_id = config.pad_id
+        self.bos_id = config.bos_id
         self.device = config.device
         self.vocab_size = config.vocab_size
         
+        self.sampling_ratio = config.sampling_ratio
+        self.do_sample = self.sampling_ratio > 0
+
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
 
         self.generator = nn.Linear(config.hidden_dim, config.vocab_size)
         self.criterion = nn.CrossEntropyLoss()
         self.out = namedtuple('Out', 'logit loss')
+
 
 
     def pad_mask(self, x):
@@ -132,13 +143,32 @@ class Transformer(nn.Module):
         return mask.to(self.device)
 
 
+    def sampling(self, logit, y):
+
+        bs, seq_len = y.shape
+        pred = logit.argmax(dim=-1)
+
+        sampled = torch.empty(bs, seq_len, self.vocab_size, dtype=torch.long)
+        sampled = sampled.fill_(self.pad_id)
+        sampled[:, 0] = self.bos_id
+
+
+        for t in range(1, seq_len):
+            if random.random() < self.sampling_ratio:
+                sampled[:, t] = y[:, t]
+            else:
+                sampled[:, t] = pred[:, t]
+
+        return sampled.to(self.device)
+
+
     @staticmethod
-    def shift_trg(x):
+    def shift_y(x):
         return x[:, :-1], x[:, 1:]
 
 
     def forward(self, x, y):
-        y, label = self.shift_trg(y)
+        y, label = self.shift_y(y)
 
         #Masking
         e_mask = self.pad_mask(x)
@@ -149,6 +179,13 @@ class Transformer(nn.Module):
         dec_out = self.decoder(y, memory, e_mask, d_mask)
         logit = self.generator(dec_out)
         
+
+        if self.do_sample:
+            y = self.sampling(logit, y)
+            d_mask = self.dec_mask(y)
+            dec_out = self.decoder(y, memory, e_mask, d_mask)
+            logit = self.generator(dec_out)
+
 
         #Getting Outputs
         self.out.logit = logit
