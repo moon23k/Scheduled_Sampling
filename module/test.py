@@ -12,9 +12,10 @@ class Tester:
 
         self.task = config.task
         self.bos_id = config.bos_id
+        self.eos_id = config.eos_id
         self.device = config.device
         self.max_len = config.max_len
-        self.model_type = config.model_type
+        self.sampling_ratio = config.sampling_ratio
         
         self.metric_name = 'BLEU' if self.task == 'translation' else 'ROUGE'
         self.metric_module = evaluate.load(self.metric_name.lower())
@@ -35,7 +36,7 @@ class Tester:
                 
                 score += self.evaluate(pred, y)
 
-        txt = f"TEST Result on {self.task.upper()} with {self.model_type.upper()} model"
+        txt = f"TEST Result on {self.task.upper()} with sampling {self.sampling_ratio} perc model"
         txt += f"\n-- Score: {round(score/len(self.dataloader), 2)}\n"
         print(txt)
 
