@@ -6,6 +6,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 
+
 class Trainer:
     def __init__(self, config, model, train_dataloader, valid_dataloader):
         super(Trainer, self).__init__()
@@ -13,6 +14,9 @@ class Trainer:
         self.model = model
         self.train_dataloader = train_dataloader
         self.valid_dataloader = valid_dataloader
+
+        self.strategy = config.strategy
+        self.iters_to_generate = config.iters_to_generate
 
         self.clip = config.clip
         self.device = config.device
@@ -24,7 +28,6 @@ class Trainer:
         self.scaler = torch.cuda.amp.GradScaler()
         self.iters_to_accumulate = config.iters_to_accumulate        
 
-        self.criterion = nn.CrossEntropyLoss()
         self.optimizer = AdamW(self.model.parameters(), lr=config.lr)
         self.lr_scheduler = ReduceLROnPlateau(self.optimizer, patience=2)
 
@@ -124,10 +127,15 @@ class Trainer:
 
         for idx, batch in enumerate(self.train_dataloader):
             idx += 1
+            is_generative = False
+            if self.strategy == 'generative' and not (idx % self.iters_to_generate):
+                is_generative = True
+            
             batch = {k: v.to(self.device) for k, v in batch.items()}
+            batch['is_generative'] = is_generative
 
             with torch.autocast(device_type=self.device_type, dtype=torch.float16):
-                loss = self.model(**batch).loss               
+                loss = self.model(**batch).loss      
                 loss = loss / self.iters_to_accumulate
             
             #Backward Loss
